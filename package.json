@@ -1,6 +1,7 @@
 {
-  "name": "pix-bot",
+  "name": "pix-multi-bot",
   "version": "1.0.0",
+  "description": "Bot Pix Multi-Usuário",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
