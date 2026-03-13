@@ -1,3 +1,23 @@
+// VERIFICAÇÃO DE BIBLIOTECAS
+console.log('🔍 VERIFICANDO BIBLIOTECAS INSTALADAS...');
+
+try {
+    const selfbotVersion = require('discord.js-selfbot-v13/package.json').version;
+    console.log(`✅ discord.js-selfbot-v13 versão ${selfbotVersion} instalada!`);
+} catch (e) {
+    console.error('❌ discord.js-selfbot-v13 NÃO está instalada!');
+    console.error('📦 Instale com: npm install discord.js-selfbot-v13@latest');
+}
+
+try {
+    const qrcodeVersion = require('qrcode/package.json').version;
+    console.log(`✅ qrcode versão ${qrcodeVersion} instalada!`);
+} catch (e) {
+    console.error('❌ qrcode NÃO está instalada!');
+}
+
+console.log('📦 Todas as verificações concluídas\n');
+
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs-extra');
