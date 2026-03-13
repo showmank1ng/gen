@@ -53,50 +53,84 @@ function salvarUsuarios() {
 const selfBotsAtivos = new Map();
 
 // ===== FUNÇÃO PARA GERAR PAYLOAD PIX (ROBUSTA) =====
-function gerarPayloadPix(chave, valor = null, descricao = '') {
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (PADRÃO OFICIAL) =====
+function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'DiscordBot', cidade = 'BRASILIA') {
     try {
-        // Se a chave for vazia, usa um placeholder
-        if (!chave) chave = '00000000000';
+        // Validação da chave
+        if (!chave) throw new Error('Chave Pix não fornecida');
         
-        // Limpeza: remove tudo que não for número, a menos que seja email
-        let chaveLimpa = chave;
-        if (!chave.includes('@')) {
-            chaveLimpa = chave.replace(/\D/g, '');
+        // Determinar tipo de chave e limpar
+        let chaveLimpa = chave.trim();
+        let tipoChave = '01'; // Padrão: telefone/CPF/CNPJ (só números)
+        
+        if (chaveLimpa.includes('@')) {
+            tipoChave = '02'; // e-mail
+        } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
+            tipoChave = '01'; // chave aleatória (trata como texto)
+        } else {
+            // Remove tudo que não for número
+            chaveLimpa = chaveLimpa.replace(/\D/g, '');
         }
-        // Se após limpeza ficar vazio, usa a original truncada
-        if (!chaveLimpa || chaveLimpa.length === 0) chaveLimpa = chave.substring(0, 20);
         
-        // Limitar tamanho (máximo 30 caracteres para evitar payload enorme)
+        // Limitar tamanho da chave (máximo 30 caracteres)
         if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
         
-        // Construir payload
-        let payload = '000201'; // Payload Format Indicator
-        payload += '0014br.gov.bcb.pix'; // Merchant Account Information
+        // Construir payload passo a passo
+        let payload = '';
         
-        const chaveLen = chaveLimpa.length.toString().padStart(2, '0');
-        payload += `01${chaveLen}${chaveLimpa}`; // Chave Pix
+        // 1. Payload Format Indicator (ID 00)
+        payload += '000201'; // Versão 01
         
-        payload += '52040000'; // Merchant Category Code
-        payload += '5303986';   // Moeda (986 = Real)
-        payload += '5802BR';    // País
-        payload += '5913DiscordBot'; // Merchant Name
-        payload += '6008BRASILIA';   // Merchant City
+        // 2. Merchant Account Information (ID 26)
+        payload += '26'; // ID do campo
+        // Subcampos do GUI (ID 00) e chave (ID 01)
+        let gui = '0014br.gov.bcb.pix';
+        let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
+        let merchantAccountInfo = gui + chaveCampo;
+        let tamanhoMAI = merchantAccountInfo.length.toString().padStart(2, '0');
+        payload += tamanhoMAI + merchantAccountInfo;
         
+        // 3. Merchant Category Code (ID 52)
+        payload += '52040000'; // Código padrão
+        
+        // 4. Transaction Currency (ID 53)
+        payload += '5303986'; // 986 = BRL
+        
+        // 5. Country Code (ID 58)
+        payload += '5802BR';
+        
+        // 6. Merchant Name (ID 59)
+        let nome = nomeRecebedor.substring(0, 25);
+        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
+        
+        // 7. Merchant City (ID 60)
+        let cid = cidade.substring(0, 15);
+        payload += '60' + cid.length.toString().padStart(2, '0') + cid;
+        
+        // 8. Valor (ID 54) - opcional
         if (valor) {
-            const valorNum = parseFloat(valor).toFixed(2);
-            const valorStr = valorNum.replace('.', '');
-            payload += `54${valorStr.length.toString().padStart(2, '0')}${valorNum}`;
+            let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
+            let valorStr = valorNum.replace('.', '');
+            payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
         }
         
+        // 9. Additional Data Field (ID 62) - opcional (descrição)
         if (descricao && descricao !== 'Pagamento via Pix') {
-            const descLimpa = descricao.substring(0, 20);
-            payload += `62${(descLimpa.length + 4).toString().padStart(2, '0')}05${descLimpa.length.toString().padStart(2, '0')}${descLimpa}`;
+            let descLimpa = descricao.substring(0, 20);
+            let txId = '***'; // Identificador da transação (opcional)
+            let campoAdicional = '05' + descLimpa.length.toString().padStart(2, '0') + descLimpa;
+            payload += '62' + (campoAdicional.length + 2).toString().padStart(2, '0') + campoAdicional;
         }
         
-        payload += '6304A1B2'; // CRC16 fixo (simplificado)
+        // 10. CRC16 (ID 63) - deve ser calculado
+        // O CRC16 é calculado sobre todo o payload até antes do campo 63
+        let payloadSemCRC = payload;
+        let crc16 = calcularCRC16(payloadSemCRC + '6304');
+        payload += '6304' + crc16;
         
         console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
         return payload;
+        
     } catch (error) {
         console.error('❌ Erro ao gerar payload:', error);
         // Retorna um payload de fallback (chave fixa)
@@ -104,8 +138,33 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
     }
 }
 
+// ===== FUNÇÃO PARA CALCULAR CRC16 (IMPLEMENTAÇÃO PADRÃO) =====
+function calcularCRC16(payload) {
+    let polinomio = 0x1021;
+    let resultado = 0xFFFF;
+    
+    for (let i = 0; i < payload.length; i++) {
+        resultado ^= (payload.charCodeAt(i) << 8);
+        for (let j = 0; j < 8; j++) {
+            if (resultado & 0x8000) {
+                resultado = (resultado << 1) ^ polinomio;
+            } else {
+                resultado = (resultado << 1);
+            }
+            resultado &= 0xFFFF;
+        }
+    }
+    
+    return resultado.toString(16).toUpperCase().padStart(4, '0');
+}
+
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
+    
+    // Cache para evitar processar mensagens duplicadas (limpa a cada 10 minutos)
+const mensagensProcessadas = new Set();
+setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
+    
     try {
         console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
@@ -126,166 +185,148 @@ async function iniciarSelfBot(usuario) {
             });
         });
 
-        // Processar mensagens
-        client.on('messageCreate', async (message) => {
-            try {
-                // Log bruto para debug
-                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
-                console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
-                console.log(`   Conteúdo: "${message.content}"`);
-                console.log(`   Canal: ${message.channel.type}`);
+        // Cache para evitar duplicação
+const mensagensProcessadas = new Set();
+setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
 
-                // Ignorar mensagens que não começam com o prefixo
-                if (!message.content.startsWith(PREFIX)) {
-                    console.log(`   ⏭️ Ignorando: não começa com ${PREFIX}`);
-                    return;
-                }
+client.on('messageCreate', async (message) => {
+    try {
+        // Log bruto
+        console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
+        console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
+        console.log(`   Conteúdo: "${message.content}"`);
+        console.log(`   Canal: ${message.channel.type}`);
 
-                // Verificar se é o dono da conta OU o admin
-                if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
-                    console.log(`   ⏭️ Ignorando: não é o dono (${usuario.userId}) nem o admin (${ADMIN_ID})`);
-                    return;
-                }
+        // Verificar duplicação
+        if (mensagensProcessadas.has(message.id)) {
+            console.log(`   ⏭️ Ignorando: mensagem já processada (ID: ${message.id})`);
+            return;
+        }
+        mensagensProcessadas.add(message.id);
 
-                // Processar comando
-                const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-                const command = args.shift().toLowerCase();
+        // Ignorar mensagens sem prefixo
+        if (!message.content.startsWith(PREFIX)) {
+            console.log(`   ⏭️ Ignorando: não começa com ${PREFIX}`);
+            return;
+        }
 
-                console.log(`   🎯 Comando detectado: ${command}`);
+        // Verificar autor (dono ou admin)
+        if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
+            console.log(`   ⏭️ Ignorando: não é o dono nem o admin`);
+            return;
+        }
 
-                // ===== COMANDO !teste =====
-                if (command === 'teste') {
-                    console.log(`   ✅ Executando TESTE`);
-                    await message.reply('✅ **Self-bot funcionando perfeitamente!**');
-                    console.log(`   ✅ Teste respondido`);
-                }
+        const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+        const command = args.shift().toLowerCase();
 
-                // ===== COMANDO !ping =====
-                if (command === 'ping') {
-                    console.log(`   ✅ Executando PING`);
-                    await message.reply('🏓 **Pong!**');
-                }
+        console.log(`   🎯 Comando: ${command}`);
 
-                // ===== COMANDO !help =====
-                if (command === 'help' || command === 'ajuda') {
-                    await message.reply(
-                        '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
-                        '`!ping` - Testar conexão\n' +
-                        '`!teste` - Testar funcionamento\n' +
-                        '`!pix [chave]` - Gerar QR Code Pix\n' +
-                        '`!pix [chave] [descrição]` - Pix com descrição\n' +
-                        '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
-                        '`!help` - Mostrar esta ajuda'
-                    );
-                }
+        // Comando !teste
+        if (command === 'teste') {
+            await message.reply('✅ **Self-bot funcionando perfeitamente!**');
+            console.log(`   ✅ Teste respondido`);
+        }
 
-                // ===== COMANDO !pix =====
-                if (command === 'pix') {
-                    console.log(`   🎯 Executando PIX`);
+        // Comando !ping
+        if (command === 'ping') {
+            await message.reply('🏓 **Pong!**');
+        }
 
-                    if (args.length === 0) {
-                        await message.reply(
-                            '❌ **Como usar o Pix:**\n' +
-                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
-                            '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
-                            '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
-                        );
-                        return;
-                    }
+        // Comando !help
+        if (command === 'help' || command === 'ajuda') {
+            await message.reply(
+                '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
+                '`!ping` - Testar conexão\n' +
+                '`!teste` - Testar funcionamento\n' +
+                '`!pix [chave]` - Gerar QR Code Pix\n' +
+                '`!pix [chave] [descrição]` - Pix com descrição\n' +
+                '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
+                '`!help` - Mostrar esta ajuda'
+            );
+        }
 
-                    let chavePix, valor, descricao;
+        // Comando !pix
+        if (command === 'pix') {
+            console.log(`   🎯 Executando PIX`);
 
-                    // Verifica se o primeiro argumento é um valor (ex: 50.00)
-                    if (args[0] && args[0].match(/^[\d,.]+$/)) {
-                        valor = args[0].replace(',', '.');
-                        chavePix = args[1];
-                        descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
-                    } else {
-                        chavePix = args[0];
-                        valor = null;
-                        descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
-                    }
-
-                    if (!chavePix) {
-                        await message.reply('❌ Chave Pix não fornecida!');
-                        return;
-                    }
-
-                    console.log(`   🔑 Chave: ${chavePix}`);
-                    if (valor) console.log(`   💰 Valor: ${valor}`);
-                    if (descricao) console.log(`   📝 Descrição: ${descricao}`);
-
-                    const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
-
-                    try {
-                        // Gerar payload
-                        const payload = gerarPayloadPix(chavePix, valor, descricao);
-                        if (!payload) {
-                            throw new Error('Payload nulo');
-                        }
-                        
-                        console.log(`   ✅ Payload gerado, gerando QR Code...`);
-
-                        // Gerar QR Code
-                        const qrBuffer = await QRCode.toBuffer(payload, {
-                            type: 'png',
-                            width: 400,
-                            margin: 2
-                        });
-
-                        console.log(`   ✅ QR Code gerado (${qrBuffer.length} bytes)`);
-
-                        const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
-
-                        let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
-                        resposta += `📋 **Detalhes:**\n`;
-                        resposta += `• Chave: \`${chavePix}\`\n`;
-                        if (valor) {
-                            const vf = parseFloat(valor).toFixed(2).replace('.', ',');
-                            resposta += `• Valor: R$ ${vf}\n`;
-                        }
-                        if (descricao && descricao !== 'Pagamento via Pix') {
-                            resposta += `• Descrição: ${descricao}\n`;
-                        }
-                        resposta += `\n📱 **Código Pix Copia e Cola:**\n\`\`\`${payload}\`\`\``;
-
-                        await message.reply({ content: resposta, files: [attachment] });
-                        await procMsg.delete();
-
-                        console.log(`   ✅ QR Code enviado com sucesso`);
-
-                        // Atualizar contador de comandos
-                        usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
-                        salvarUsuarios();
-
-                    } catch (error) {
-                        console.error(`   ❌ Erro no QR Code:`, error);
-                        await procMsg.delete();
-                        await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
-                    }
-                }
-            } catch (error) {
-                console.error('❌ Erro no processamento da mensagem:', error);
+            if (args.length === 0) {
+                await message.reply(
+                    '❌ **Como usar o Pix:**\n' +
+                    '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
+                    '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
+                    '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
+                );
+                return;
             }
-        });
 
-        client.on('error', (error) => {
-            console.error(`❌ Erro no self-bot de ${usuario.discordTag}:`, error.message);
-            usuario.status = 'offline';
-            salvarUsuarios();
-            selfBotsAtivos.delete(usuario.userId);
-        });
+            let chavePix, valor, descricao;
 
-        await client.login(usuario.userToken);
-        console.log(`✅ Self-bot ${usuario.discordTag} iniciado.`);
-        return true;
+            if (args[0] && args[0].match(/^[\d,.]+$/)) {
+                valor = args[0].replace(',', '.');
+                chavePix = args[1];
+                descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
+            } else {
+                chavePix = args[0];
+                valor = null;
+                descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
+            }
+
+            if (!chavePix) {
+                await message.reply('❌ Chave Pix não fornecida!');
+                return;
+            }
+
+            console.log(`   🔑 Chave: ${chavePix}`);
+            if (valor) console.log(`   💰 Valor: ${valor}`);
+            if (descricao) console.log(`   📝 Descrição: ${descricao}`);
+
+            const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
+
+            try {
+                const payload = gerarPayloadPix(chavePix, valor, descricao);
+                console.log(`   ✅ Payload gerado, gerando QR Code...`);
+
+                const qrBuffer = await QRCode.toBuffer(payload, {
+                    type: 'png',
+                    width: 400,
+                    margin: 2,
+                    errorCorrectionLevel: 'M'
+                });
+
+                console.log(`   ✅ QR Code gerado (${qrBuffer.length} bytes)`);
+
+                const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
+
+                let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
+                resposta += `📋 **Detalhes:**\n`;
+                resposta += `• Chave: \`${chavePix}\`\n`;
+                if (valor) {
+                    const vf = parseFloat(valor).toFixed(2).replace('.', ',');
+                    resposta += `• Valor: R$ ${vf}\n`;
+                }
+                if (descricao && descricao !== 'Pagamento via Pix') {
+                    resposta += `• Descrição: ${descricao}\n`;
+                }
+                resposta += `\n📱 **Código Pix Copia e Cola:**\n\`\`\`${payload}\`\`\``;
+
+                await message.reply({ content: resposta, files: [attachment] });
+                await procMsg.delete();
+
+                console.log(`   ✅ QR Code enviado com sucesso`);
+
+                usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
+                salvarUsuarios();
+
+            } catch (error) {
+                console.error(`   ❌ Erro no QR Code:`, error);
+                await procMsg.delete();
+                await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
+            }
+        }
     } catch (error) {
-        console.error(`❌ Erro ao iniciar self-bot:`, error.message);
-        usuario.status = 'offline';
-        salvarUsuarios();
-        return false;
+        console.error('❌ Erro no self-bot:', error);
     }
-}
+});
 
 // ===== INICIAR TODOS OS SELF-BOTS =====
 function iniciarTodosSelfBots() {
