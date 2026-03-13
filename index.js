@@ -90,15 +90,15 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
 // ===== FUNÇÃO PARA INICIAR UM SELF-BOT =====
 async function iniciarSelfBot(usuario) {
     try {
-        console.log(`🔄 Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
+        console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
         const client = new SelfBotClient({
             checkUpdate: false,
-            intents: 32767 // Todas as intents (essencial para receber mensagens)
+            intents: 32767 // Todas as intents
         });
 
         client.on('ready', () => {
-            console.log(`✅✅✅ SELF-BOT ONLINE: ${client.user.tag}`);
+            console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
             usuario.status = 'online';
             usuario.discordTag = client.user.tag;
             salvarUsuarios();
@@ -108,139 +108,30 @@ async function iniciarSelfBot(usuario) {
                 tag: client.user.tag
             });
 
-            console.log(`🎯 ${client.user.tag} aguardando comandos...`);
+            // Envia uma mensagem de teste para si mesmo (opcional)
+            // client.users.fetch(usuario.userId).then(user => user.send('Bot iniciado!')).catch(console.error);
         });
 
-        // Evento para mensagens (RAW) – isso sempre logará, independente de filtros
-        client.on('messageCreate', async (message) => {
-            // Log bruto para debug (aparece no Render)
-            console.log(`\n📨 [RAW] ${client.user.tag} recebeu:`);
+        // Log de todas as mensagens que chegam (sem nenhum filtro)
+        client.on('messageCreate', (message) => {
+            console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem CRUA recebida:`);
             console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
             console.log(`   Conteúdo: "${message.content}"`);
             console.log(`   Canal: ${message.channel.type}`);
+            console.log(`   ID do Dono esperado: ${usuario.userId}`);
 
-            try {
-                // 1. Ignorar mensagens do próprio bot
-                if (message.author.id === client.user.id) return;
+            // Ignorar próprias mensagens
+            if (message.author.id === client.user.id) {
+                console.log(`   ⏭️ Ignorando própria mensagem`);
+                return;
+            }
 
-                // 2. Verificar se é o dono da conta
-                if (message.author.id !== usuario.userId) {
-                    console.log(`   ⏭️ Ignorado: não é o dono da conta.`);
-                    return;
-                }
-
-                console.log(`   ✅ Dono da conta identificado.`);
-
-                // 3. Verificar prefixo
-                if (!message.content.startsWith(PREFIX)) {
-                    console.log(`   ⏭️ Ignorado: não começa com ${PREFIX}`);
-                    return;
-                }
-
-                // 4. Processar comando
-                const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-                const command = args.shift().toLowerCase();
-
-                console.log(`   🎯 Comando: ${command}`);
-
-                // Comando !ping
-                if (command === 'ping') {
-                    await message.reply('🏓 **Pong!**');
-                    console.log(`   ✅ Ping respondido`);
-                }
-
-                // Comando !teste
-                if (command === 'teste') {
-                    await message.reply('✅ **Self-bot funcionando perfeitamente!**');
-                    console.log(`   ✅ Teste respondido`);
-                }
-
-                // Comando !help
-                if (command === 'help' || command === 'ajuda') {
-                    await message.reply(
-                        '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
-                        '`!ping` - Testar conexão\n' +
-                        '`!teste` - Testar funcionamento\n' +
-                        '`!pix [chave]` - Gerar QR Code Pix\n' +
-                        '`!pix [chave] [descrição]` - Pix com descrição\n' +
-                        '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
-                        '`!help` - Mostrar esta ajuda'
-                    );
-                }
-
-                // Comando !pix
-                if (command === 'pix') {
-                    console.log(`   🎯 Executando PIX`);
-
-                    if (args.length === 0) {
-                        await message.reply(
-                            '❌ **Como usar o Pix:**\n' +
-                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
-                            '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
-                            '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
-                        );
-                        return;
-                    }
-
-                    let chavePix, valor, descricao;
-
-                    // Verificar se o primeiro argumento é um valor (ex: 50.00)
-                    if (args[0] && args[0].match(/^[\d,.]+$/)) {
-                        valor = args[0].replace(',', '.');
-                        chavePix = args[1];
-                        descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
-                    } else {
-                        chavePix = args[0];
-                        valor = null;
-                        descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
-                    }
-
-                    if (!chavePix) {
-                        await message.reply('❌ Chave Pix não fornecida!');
-                        return;
-                    }
-
-                    console.log(`   🔑 Chave: ${chavePix}`);
-                    if (valor) console.log(`   💰 Valor: ${valor}`);
-                    if (descricao) console.log(`   📝 Descrição: ${descricao}`);
-
-                    const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
-
-                    try {
-                        const payload = gerarPayloadPix(chavePix, valor, descricao);
-                        if (!payload) throw new Error('Payload inválido');
-
-                        const qrBuffer = await QRCode.toBuffer(payload, { width: 400, margin: 2 });
-                        const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
-
-                        let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
-                        resposta += `📋 **Detalhes:**\n`;
-                        resposta += `• Chave: \`${chavePix}\`\n`;
-                        if (valor) {
-                            const vf = parseFloat(valor).toFixed(2).replace('.', ',');
-                            resposta += `• Valor: R$ ${vf}\n`;
-                        }
-                        if (descricao && descricao !== 'Pagamento via Pix') {
-                            resposta += `• Descrição: ${descricao}\n`;
-                        }
-                        resposta += `\n📱 **Código Pix Copia e Cola:**\n\`\`\`${payload}\`\`\``;
-
-                        await message.reply({ content: resposta, files: [attachment] });
-                        await procMsg.delete();
-
-                        // Atualizar contador
-                        usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
-                        salvarUsuarios();
-
-                        console.log(`   ✅ QR Code enviado com sucesso`);
-                    } catch (err) {
-                        console.error(`   ❌ Erro no QR Code:`, err);
-                        await procMsg.delete();
-                        await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
-                    }
-                }
-            } catch (error) {
-                console.error('❌ Erro ao processar mensagem:', error);
+            // Se for do dono, responder com um simples "recebido"
+            if (message.author.id === usuario.userId) {
+                console.log(`   ✅ É o dono! Respondendo...`);
+                message.reply('✅ Mensagem recebida pelo self-bot!').catch(console.error);
+            } else {
+                console.log(`   ⏭️ Não é o dono.`);
             }
         });
 
