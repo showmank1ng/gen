@@ -36,21 +36,22 @@ try {
         fs.writeFileSync(dbPath, JSON.stringify([]));
         console.log('📂 Novo banco criado');
     }
-} catch (e) {
-    console.log('Erro ao ler banco:', e);
+} catch (error) {
+    console.log('Erro ao ler banco:', error);
     usuarios = [];
 }
 
 function salvarUsuarios() {
     try {
         fs.writeFileSync(dbPath, JSON.stringify(usuarios, null, 2));
-    } catch (e) {
-        console.log('Erro ao salvar:', e);
+        console.log('💾 Banco salvo com sucesso');
+    } catch (error) {
+        console.log('Erro ao salvar:', error);
     }
 }
 
 // ===== SELF-BOTS ATIVOS =====
-const selfBotsAtivos = new Map(); // key: userId, value: { client, tag }
+const selfBotsAtivos = new Map();
 
 // ===== FUNÇÃO PARA GERAR PAYLOAD PIX =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
@@ -58,12 +59,17 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         let chaveLimpa = chave.replace(/\D/g, '');
         if (!chaveLimpa || chaveLimpa.length < 3) chaveLimpa = chave;
         
-        let payload = '0002010014br.gov.bcb.pix';
+        let payload = '000201';
+        payload += '0014br.gov.bcb.pix';
         
         const chaveLen = chaveLimpa.length.toString().padStart(2, '0');
         payload += `01${chaveLen}${chaveLimpa}`;
         
-        payload += '5204000053039865802BR5913DiscordBot6008BRASILIA';
+        payload += '52040000';
+        payload += '5303986';
+        payload += '5802BR';
+        payload += '5913DiscordBotPix';
+        payload += '6008BRASILIA';
         
         if (valor) {
             const valorNum = parseFloat(valor).toFixed(2);
@@ -85,7 +91,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
     }
 }
 
-// ===== FUNÇÃO PARA INICIAR SELF-BOT DO USUÁRIO =====
+// ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
     try {
         console.log(`🔄 Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
@@ -106,39 +112,71 @@ async function iniciarSelfBot(usuario) {
                 tag: client.user.tag
             });
             
-            console.log(`🎯 ${client.user.tag} pronto para receber comandos!`);
+            console.log(`🎯 ${client.user.tag} pronto para receber comandos em QUALQUER LUGAR!`);
         });
 
-        // ===== PROCESSAR COMANDOS DO USUÁRIO =====
+        // ===== PROCESSAR COMANDOS DO USUÁRIO EM QUALQUER LUGAR =====
         client.on('messageCreate', async (message) => {
             try {
-                // LOG SIMPLES (vai aparecer no Render)
-                console.log(`📨 [${client.user.tag}] Mensagem: "${message.content}" de ${message.author.tag}`);
+                // LOG PARA DEBUG (vai aparecer no Render)
+                console.log(`\n📨 [${client.user.tag}] Mensagem recebida:`);
+                console.log(`  De: ${message.author.tag} (${message.author.id})`);
+                console.log(`  Conteúdo: "${message.content}"`);
+                console.log(`  Canal: ${message.channel.type}`);
+                console.log(`  ID do Dono: ${usuario.userId}`);
                 
                 // 1. IGNORAR PRÓPRIAS MENSAGENS
-                if (message.author.id === client.user.id) return;
+                if (message.author.id === client.user.id) {
+                    console.log(`  ⏭️ Ignorando própria mensagem`);
+                    return;
+                }
                 
-                // 2. VERIFICAR SE É O PRÓPRIO USUÁRIO
-                if (message.author.id !== usuario.userId) return;
+                // 2. VERIFICAR SE É O PRÓPRIO USUÁRIO (dono da conta)
+                if (message.author.id !== usuario.userId) {
+                    console.log(`  ⏭️ Ignorando mensagem de outro usuário`);
+                    return;
+                }
+                
+                console.log(`  ✅ É o próprio usuário!`);
                 
                 // 3. VERIFICAR SE É COMANDO
-                if (!message.content.startsWith(PREFIX)) return;
+                if (!message.content.startsWith(PREFIX)) {
+                    console.log(`  ⏭️ Não começa com prefixo ${PREFIX}`);
+                    return;
+                }
                 
                 // 4. PROCESSAR COMANDO
                 const args = message.content.slice(PREFIX.length).trim().split(/ +/);
                 const command = args.shift().toLowerCase();
                 
-                console.log(`  🎯 Comando: ${command}`);
+                console.log(`  🎯 Comando detectado: "${command}"`);
+                
+                // ===== COMANDO: !ping =====
+                if (command === 'ping') {
+                    console.log(`  ✅ Executando PING`);
+                    await message.reply('🏓 **Pong!**');
+                    console.log(`  ✅ Ping respondido`);
+                }
                 
                 // ===== COMANDO: !teste =====
                 if (command === 'teste') {
+                    console.log(`  ✅ Executando TESTE`);
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
                     console.log(`  ✅ Teste respondido`);
                 }
                 
-                // ===== COMANDO: !ping =====
-                if (command === 'ping') {
-                    await message.reply('🏓 **Pong!**');
+                // ===== COMANDO: !help =====
+                if (command === 'help' || command === 'ajuda') {
+                    console.log(`  ✅ Executando HELP`);
+                    await message.reply(
+                        '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
+                        '`!ping` - Testar conexão\n' +
+                        '`!teste` - Testar funcionamento\n' +
+                        '`!pix [chave]` - Gerar QR Code Pix\n' +
+                        '`!pix [chave] [descrição]` - Pix com descrição\n' +
+                        '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
+                        '`!help` - Mostrar esta ajuda'
+                    );
                 }
                 
                 // ===== COMANDO: !pix =====
@@ -146,33 +184,97 @@ async function iniciarSelfBot(usuario) {
                     console.log(`  🎯 Executando PIX`);
                     
                     if (args.length === 0) {
-                        await message.reply('❌ Use: !pix [chave] - Ex: !pix 11999999999');
+                        await message.reply(
+                            '❌ **Como usar o Pix:**\n' +
+                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
+                            '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
+                            '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
+                        );
                         return;
                     }
 
-                    const chave = args[0];
-                    const procMsg = await message.reply('🔄 Gerando QR Code...');
+                    // Processar argumentos
+                    let chavePix, valor, descricao;
+                    
+                    if (args[0] && args[0].match(/^[\d,.]+$/)) {
+                        valor = args[0].replace(',', '.');
+                        chavePix = args[1];
+                        descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
+                    } else {
+                        chavePix = args[0];
+                        valor = null;
+                        descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
+                    }
+
+                    if (!chavePix) {
+                        await message.reply('❌ Chave Pix não fornecida!');
+                        return;
+                    }
+
+                    console.log(`  🔑 Chave: ${chavePix}`);
+                    if (valor) console.log(`  💰 Valor: ${valor}`);
+                    if (descricao) console.log(`  📝 Descrição: ${descricao}`);
+
+                    const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
                     
                     try {
-                        // Função simplificada de payload
-                        const chaveLimpa = chave.replace(/\D/g, '');
-                        const payload = `0002010014br.gov.bcb.pix01${chaveLimpa.length.toString().padStart(2, '0')}${chaveLimpa}5204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2`;
+                        // Gerar payload
+                        const payload = gerarPayloadPix(chavePix, valor, descricao);
                         
-                        const qrBuffer = await QRCode.toBuffer(payload);
-                        const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
+                        if (!payload) {
+                            throw new Error('Falha ao gerar payload');
+                        }
+                        
+                        console.log(`  ✅ Payload gerado`);
+                        
+                        // Gerar QR Code
+                        const qrBuffer = await QRCode.toBuffer(payload, {
+                            type: 'png',
+                            width: 400,
+                            margin: 2
+                        });
+                        
+                        console.log(`  ✅ QR Code gerado`);
+                        
+                        const attachment = new AttachmentBuilder(qrBuffer, { 
+                            name: `pix-${Date.now()}.png` 
+                        });
 
+                        // Montar resposta
+                        let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
+                        resposta += `📋 **Detalhes:**\n`;
+                        resposta += `• Chave: \`${chavePix}\`\n`;
+                        
+                        if (valor) {
+                            const valorFormatado = parseFloat(valor).toFixed(2);
+                            resposta += `• Valor: R$ ${valorFormatado.replace('.', ',')}\n`;
+                        }
+                        
+                        if (descricao && descricao !== 'Pagamento via Pix') {
+                            resposta += `• Descrição: ${descricao}\n`;
+                        }
+                        
+                        resposta += `\n📱 **Código Pix Copia e Cola:**\n`;
+                        resposta += `\`\`\`${payload}\`\`\``;
+
+                        // Enviar resposta
                         await message.reply({
-                            content: `✅ QR Code para: \`${chave}\``,
+                            content: resposta,
                             files: [attachment]
                         });
                         
                         await procMsg.delete();
-                        console.log(`  ✅ Pix enviado`);
                         
+                        console.log(`  ✅ QR Code enviado com sucesso!`);
+                        
+                        // Atualizar contador
+                        usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
+                        salvarUsuarios();
+
                     } catch (error) {
-                        console.error('  ❌ Erro:', error);
+                        console.error(`  ❌ Erro no QR Code:`, error);
                         await procMsg.delete();
-                        await message.reply('❌ Erro ao gerar QR Code');
+                        await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
                     }
                 }
                 
@@ -186,22 +288,7 @@ async function iniciarSelfBot(usuario) {
         });
 
         await client.login(usuario.userToken);
-        return true;
-
-    } catch (error) {
-        console.error(`❌ Erro ao iniciar self-bot:`, error.message);
-        usuario.status = 'offline';
-        salvarUsuarios();
-        return false;
-    }
-}
-        
-    } catch (error) {
-        console.error('❌ Erro no self-bot:', error);
-    }
-});
-
-        await client.login(usuario.userToken);
+        console.log(`✅ Self-bot ${usuario.discordTag} iniciado com sucesso!`);
         return true;
 
     } catch (error) {
@@ -222,7 +309,7 @@ function iniciarTodosSelfBots() {
     }
 }
 
-// ===== BOT PRINCIPAL (GERENCIADOR) =====
+// ===== BOT PRINCIPAL =====
 const botPrincipal = new BotPrincipalClient({
     intents: [
         GatewayIntentBits.Guilds,
