@@ -52,16 +52,16 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (ROBUSTA) =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
     try {
         // Se a chave for vazia, usa um placeholder
-        if (!chave) chave = '00000000000';
+        if (!chave || chave.trim() === '') chave = '00000000000';
         
         // Limpeza: remove tudo que não for número, a menos que seja email
-        let chaveLimpa = chave;
-        if (!chave.includes('@')) {
-            chaveLimpa = chave.replace(/\D/g, '');
+        let chaveLimpa = chave.trim();
+        if (!chaveLimpa.includes('@')) {
+            chaveLimpa = chaveLimpa.replace(/\D/g, '');
         }
         // Se após limpeza ficar vazio, usa a original truncada
         if (!chaveLimpa) chaveLimpa = chave.substring(0, 20);
@@ -92,12 +92,35 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         return payload;
     } catch (error) {
         console.error('❌ Erro ao gerar payload:', error);
-        return '0002010014br.gov.bcb.pix01111234567895204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2'; // payload padrão de fallback
+        // Retorna um payload padrão de fallback
+        return '0002010014br.gov.bcb.pix01111234567895204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2';
+    }
+}
+
+// ===== FUNÇÃO PARA GERAR QR CODE COM TRATAMENTO DE ERRO =====
+async function gerarQRCodeBuffer(payload) {
+    try {
+        const buffer = await QRCode.toBuffer(payload, {
+            type: 'png',
+            width: 400,
+            margin: 2,
+            errorCorrectionLevel: 'M'
+        });
+        return buffer;
+    } catch (error) {
+        console.error('❌ Erro na geração do QR Code (toBuffer):', error);
+        throw error;
     }
 }
 
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
+    // Evitar duplicatas
+    if (selfBotsAtivos.has(usuario.userId)) {
+        console.log(`⚠️ Self-bot para ${usuario.discordTag} já está ativo. Pulando.`);
+        return true;
+    }
+
     try {
         console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
@@ -117,150 +140,153 @@ async function iniciarSelfBot(usuario) {
                 tag: client.user.tag
             });
 
-            // Heartbeat
-            setInterval(() => {
-                console.log(`💓 [${client.user.tag}] Heartbeat - ainda online`);
-            }, 30000);
+            // Envia uma mensagem de teste para si mesmo (opcional, descomentar se quiser)
+            // client.users.fetch(usuario.userId).then(user => user.send('Bot iniciado!')).catch(console.error);
         });
 
-client.on('messageCreate', async (message) => {
-    try {
-        // Log bruto para debug
-        console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
-        console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
-        console.log(`   Conteúdo: "${message.content}"`);
-        console.log(`   Canal: ${message.channel.type}`);
-
-        // Ignorar mensagens que não começam com o prefixo (evita processar respostas do próprio bot)
-        if (!message.content.startsWith(PREFIX)) {
-            console.log(`   ⏭️ Ignorando: não começa com ${PREFIX}`);
-            return;
-        }
-
-        // Verificar se é o dono da conta OU o admin
-        if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
-            console.log(`   ⏭️ Ignorando: não é o dono (${usuario.userId}) nem o admin (${ADMIN_ID})`);
-            return;
-        }
-
-        // Processar comando
-        const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-        const command = args.shift().toLowerCase();
-
-        console.log(`   🎯 Comando detectado: ${command}`);
-
-        // Comando !teste
-        if (command === 'teste') {
-            console.log(`   ✅ Executando TESTE`);
-            await message.reply('✅ **Self-bot funcionando perfeitamente!**');
-            console.log(`   ✅ Teste respondido`);
-        }
-
-        // Comando !ping
-        if (command === 'ping') {
-            console.log(`   ✅ Executando PING`);
-            await message.reply('🏓 **Pong!**');
-        }
-
-        // Comando !help
-        if (command === 'help' || command === 'ajuda') {
-            await message.reply(
-                '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
-                '`!ping` - Testar conexão\n' +
-                '`!teste` - Testar funcionamento\n' +
-                '`!pix [chave]` - Gerar QR Code Pix\n' +
-                '`!pix [chave] [descrição]` - Pix com descrição\n' +
-                '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
-                '`!help` - Mostrar esta ajuda'
-            );
-        }
-
-        // Comando !pix
-        if (command === 'pix') {
-            console.log(`   🎯 Executando PIX`);
-
-            if (args.length === 0) {
-                await message.reply(
-                    '❌ **Como usar o Pix:**\n' +
-                    '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
-                    '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
-                    '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
-                );
-                return;
-            }
-
-            let chavePix, valor, descricao;
-
-            // Verifica se o primeiro argumento é um valor (ex: 50.00)
-            if (args[0] && args[0].match(/^[\d,.]+$/)) {
-                valor = args[0].replace(',', '.');
-                chavePix = args[1];
-                descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
-            } else {
-                chavePix = args[0];
-                valor = null;
-                descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
-            }
-
-            if (!chavePix) {
-                await message.reply('❌ Chave Pix não fornecida!');
-                return;
-            }
-
-            console.log(`   🔑 Chave: ${chavePix}`);
-            if (valor) console.log(`   💰 Valor: ${valor}`);
-            if (descricao) console.log(`   📝 Descrição: ${descricao}`);
-
-            const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
-
+        // ===== PROCESSAR COMANDOS NO SELF-BOT =====
+        client.on('messageCreate', async (message) => {
             try {
-                // Gerar payload
-                const payload = gerarPayloadPix(chavePix, valor, descricao);
-                if (!payload) {
-                    throw new Error('Falha ao gerar payload (função retornou null)');
+                // Log bruto
+                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
+                console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
+                console.log(`   Conteúdo: "${message.content}"`);
+                console.log(`   Canal: ${message.channel.type}`);
+
+                // Ignorar mensagens que não começam com o prefixo
+                if (!message.content.startsWith(PREFIX)) {
+                    console.log(`   ⏭️ Ignorando: não começa com ${PREFIX}`);
+                    return;
                 }
-                console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
 
-                // Gerar QR Code
-                const qrBuffer = await QRCode.toBuffer(payload, {
-                    type: 'png',
-                    width: 400,
-                    margin: 2
-                });
-
-                const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
-
-                let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
-                resposta += `📋 **Detalhes:**\n`;
-                resposta += `• Chave: \`${chavePix}\`\n`;
-                if (valor) {
-                    const vf = parseFloat(valor).toFixed(2).replace('.', ',');
-                    resposta += `• Valor: R$ ${vf}\n`;
+                // Verificar se é o dono da conta OU o admin
+                if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
+                    console.log(`   ⏭️ Ignorando: não é o dono (${usuario.userId}) nem o admin (${ADMIN_ID})`);
+                    return;
                 }
-                if (descricao && descricao !== 'Pagamento via Pix') {
-                    resposta += `• Descrição: ${descricao}\n`;
+
+                // Processar comando
+                const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+                const command = args.shift().toLowerCase();
+
+                console.log(`   🎯 Comando detectado: ${command}`);
+
+                // Comando !teste
+                if (command === 'teste') {
+                    console.log(`   ✅ Executando TESTE`);
+                    await message.reply('✅ **Self-bot funcionando perfeitamente!**');
+                    console.log(`   ✅ Teste respondido`);
+                    return;
                 }
-                resposta += `\n📱 **Código Pix Copia e Cola:**\n\`\`\`${payload}\`\`\``;
 
-                await message.reply({ content: resposta, files: [attachment] });
-                await procMsg.delete();
+                // Comando !ping
+                if (command === 'ping') {
+                    console.log(`   ✅ Executando PING`);
+                    await message.reply('🏓 **Pong!**`);
+                    return;
+                }
 
-                console.log(`   ✅ QR Code enviado com sucesso`);
+                // Comando !help
+                if (command === 'help' || command === 'ajuda') {
+                    await message.reply(
+                        '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
+                        '`!ping` - Testar conexão\n' +
+                        '`!teste` - Testar funcionamento\n' +
+                        '`!pix [chave]` - Gerar QR Code Pix\n' +
+                        '`!pix [chave] [descrição]` - Pix com descrição\n' +
+                        '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
+                        '`!help` - Mostrar esta ajuda'
+                    );
+                    return;
+                }
 
-                // Atualizar contador de comandos
-                usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
-                salvarUsuarios();
+                // Comando !pix
+                if (command === 'pix') {
+                    console.log(`   🎯 Executando PIX`);
 
+                    if (args.length === 0) {
+                        await message.reply(
+                            '❌ **Como usar o Pix:**\n' +
+                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
+                            '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
+                            '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
+                        );
+                        return;
+                    }
+
+                    let chavePix, valor, descricao;
+
+                    // Verifica se o primeiro argumento é um valor (ex: 50.00)
+                    if (args[0] && args[0].match(/^[\d,.]+$/)) {
+                        valor = args[0].replace(',', '.');
+                        chavePix = args[1];
+                        descricao = args.slice(2).join(' ') || 'Pagamento via Pix';
+                    } else {
+                        chavePix = args[0];
+                        valor = null;
+                        descricao = args.slice(1).join(' ') || 'Pagamento via Pix';
+                    }
+
+                    if (!chavePix) {
+                        await message.reply('❌ Chave Pix não fornecida!');
+                        return;
+                    }
+
+                    console.log(`   🔑 Chave: ${chavePix}`);
+                    if (valor) console.log(`   💰 Valor: ${valor}`);
+                    if (descricao) console.log(`   📝 Descrição: ${descricao}`);
+
+                    const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
+
+                    try {
+                        // Gerar payload
+                        const payload = gerarPayloadPix(chavePix, valor, descricao);
+                        if (!payload) {
+                            throw new Error('Payload gerado é null');
+                        }
+                        console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
+
+                        // Gerar QR Code
+                        const qrBuffer = await gerarQRCodeBuffer(payload);
+
+                        const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
+
+                        let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
+                        resposta += `📋 **Detalhes:**\n`;
+                        resposta += `• Chave: \`${chavePix}\`\n`;
+                        if (valor) {
+                            const vf = parseFloat(valor).toFixed(2).replace('.', ',');
+                            resposta += `• Valor: R$ ${vf}\n`;
+                        }
+                        if (descricao && descricao !== 'Pagamento via Pix') {
+                            resposta += `• Descrição: ${descricao}\n`;
+                        }
+                        resposta += `\n📱 **Código Pix Copia e Cola:**\n\`\`\`${payload}\`\`\``;
+
+                        await message.reply({ content: resposta, files: [attachment] });
+                        await procMsg.delete();
+
+                        console.log(`   ✅ QR Code enviado com sucesso`);
+
+                        // Atualizar contador
+                        usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
+                        salvarUsuarios();
+
+                    } catch (error) {
+                        console.error(`   ❌ Erro no QR Code:`, error);
+                        console.error(`   Stack:`, error.stack);
+                        await procMsg.delete();
+                        await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
+                    }
+                    return;
+                }
+
+                // Se chegou aqui, comando não reconhecido
+                console.log(`   ⏭️ Comando não reconhecido`);
             } catch (error) {
-                console.error(`   ❌ Erro no QR Code:`, error);
-                await procMsg.delete();
-                await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
+                console.error('❌ Erro no processamento da mensagem:', error);
             }
-        }
-    } catch (error) {
-        console.error('❌ Erro no self-bot:', error);
-    }
-});
+        });
 
         client.on('error', (error) => {
             console.error(`❌ Erro no self-bot de ${usuario.discordTag}:`, error.message);
@@ -318,7 +344,9 @@ botPrincipal.on('messageCreate', async (message) => {
         return message.reply('🏓 Pong!');
     }
 
-    if (!isAdmin) return;
+    if (!isAdmin) {
+        return message.reply('❌ Apenas o administrador pode usar este comando.');
+    }
 
     if (command === 'status') {
         return message.reply(
