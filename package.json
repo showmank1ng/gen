@@ -1,20 +1,23 @@
 {
   "name": "pix-multi-bot",
   "version": "1.0.0",
-  "description": "Pix QR Code Multi-User Bot",
+  "description": "Bot para gerar QR Code Pix com múltiplos usuários",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "install": "npm install discord.js-selfbot-v13@latest --save",
+    "postinstall": "npm list discord.js-selfbot-v13"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "discord.js-selfbot-v13": "^3.1.4",
+    "discord.js-selfbot-v13": "latest",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "fs-extra": "^11.2.0",
     "qrcode": "^1.5.3"
   },
   "engines": {
-    "node": "18.x"
+    "node": "18.x",
+    "npm": "9.x"
   }
 }
