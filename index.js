@@ -1,23 +1,31 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
-
 const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 3000;
+const { Client, GatewayIntentBits } = require('discord.js');
+const fs = require('fs-extra');
+const path = require('path');
 
-// Configuração do servidor web (para manter online)
+// ===== CONFIGURAÇÃO DO SERVIDOR WEB =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('✅ Pix Multi-Bot está online!');
+    res.send(`
+        <html>
+            <head><title>Pix Multi Bot</title></head>
+            <body>
+                <h1>✅ Bot está online!</h1>
+                <p>Servidor rodando na porta ${PORT}</p>
+                <p><small>Render uptime: ${process.uptime().toFixed(0)}s</small></p>
+            </body>
+        </html>
+    `);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Servidor web rodando na porta ${PORT}`);
+    console.log(`🌐 Web server: http://0.0.0.0:${PORT}`);
 });
 
-// Cliente principal do Discord (gerenciador)
+// ===== CONFIGURAÇÃO DO BOT PRINCIPAL =====
 const mainClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -27,128 +35,74 @@ const mainClient = new Client({
     ]
 });
 
-// Armazenar clientes ativos
-const activeClients = new Map();
-
-// Carregar banco de dados
-const usersDbPath = path.join(__dirname, 'database', 'users.json');
-fs.ensureDirSync(path.join(__dirname, 'database'));
-
-if (!fs.existsSync(usersDbPath)) {
-    fs.writeJsonSync(usersDbPath, { users: [] });
+// ===== VERIFICAÇÃO DE TOKEN =====
+const token = process.env.MAIN_BOT_TOKEN;
+if (!token) {
+    console.error('❌ ERRO: MAIN_BOT_TOKEN não configurado!');
+    console.error('Adicione nas Environment Variables do Render');
+    process.exit(1);
 }
 
-// Carregar comandos
-mainClient.commands = new Map();
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    mainClient.commands.set(command.name, command);
-}
-
-// Função para iniciar cliente de usuário
-async function startUserClient(userData) {
-    try {
-        const { Client: SelfBot } = require('discord.js-selfbot-v13');
-        const userClient = new SelfBot({ checkUpdate: false });
-        
-        // Carregar utilitários para o cliente do usuário
-        const qrGenerator = require('./utils/qrGenerator');
-        
-        userClient.on('ready', () => {
-            console.log(`✅ Usuário ${userClient.user.tag} está online!`);
-            activeClients.set(userData.userId, {
-                client: userClient,
-                data: userData
-            });
-        });
-
-        userClient.on('messageCreate', async (message) => {
-            if (message.author.id === userClient.user.id) return;
-            if (!message.content.startsWith(process.env.PREFIX)) return;
-
-            const args = message.content.slice(process.env.PREFIX.length).trim().split(/ +/);
-            const commandName = args.shift().toLowerCase();
-
-            // Comandos específicos para o self-bot
-            if (commandName === 'pix') {
-                try {
-                    const result = await qrGenerator.generatePixQR(args);
-                    
-                    if (result.error) {
-                        await message.reply(result.error);
-                        return;
-                    }
-
-                    await message.reply({
-                        content: result.message,
-                        files: [result.attachment]
-                    });
-
-                    // Atualizar estatísticas
-                    updateUserStats(userData.userId);
-                    
-                } catch (error) {
-                    console.error('Erro no comando pix:', error);
-                    await message.reply('❌ Erro ao gerar QR Code Pix');
-                }
-            }
-        });
-
-        await userClient.login(userData.userToken);
-        return true;
-        
-    } catch (error) {
-        console.error(`Erro ao iniciar cliente para usuário ${userData.userId}:`, error);
-        return false;
-    }
-}
-
-// Função para atualizar estatísticas
-function updateUserStats(userId) {
-    const db = fs.readJsonSync(usersDbPath);
-    const user = db.users.find(u => u.userId === userId);
-    if (user) {
-        user.commandsUsed = (user.commandsUsed || 0) + 1;
-        user.lastUsed = new Date().toISOString();
-        fs.writeJsonSync(usersDbPath, db);
-    }
-}
-
-// Eventos do bot principal
+// ===== EVENTOS DO BOT =====
 mainClient.once('ready', () => {
-    console.log(`🤖 Bot Gerenciador online: ${mainClient.user.tag}`);
-    console.log(`📊 Carregando usuários ativos...`);
-    
-    // Iniciar todos os usuários ativos do banco de dados
-    const db = fs.readJsonSync(usersDbPath);
-    db.users.forEach(user => {
-        if (user.status === 'active') {
-            startUserClient(user);
-        }
-    });
+    console.log(`✅ Bot principal: ${mainClient.user.tag}`);
+    console.log(`📊 Prefixo: ${process.env.PREFIX || '!'}`);
 });
 
-mainClient.on('messageCreate', async (message) => {
+mainClient.on('messageCreate', async message => {
     if (message.author.bot) return;
-    if (!message.content.startsWith(process.env.PREFIX)) return;
+    
+    const prefix = process.env.PREFIX || '!';
+    if (!message.content.startsWith(prefix)) return;
 
-    const args = message.content.slice(process.env.PREFIX.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
+    const args = message.content.slice(prefix.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
 
-    if (!mainClient.commands.has(commandName)) return;
-
-    try {
-        const command = mainClient.commands.get(commandName);
-        await command.execute(message, args, { mainClient, activeClients, startUserClient, usersDbPath, fs });
-    } catch (error) {
-        console.error(error);
-        await message.reply('❌ Erro ao executar comando');
+    // Comando de teste
+    if (command === 'ping') {
+        await message.reply('🏓 Pong!');
+    }
+    
+    // Comando de ajuda
+    if (command === 'ajuda' || command === 'help') {
+        await message.reply(
+            '**Comandos disponíveis:**\n' +
+            '`!ping` - Testar se o bot responde\n' +
+            '`!status` - Ver status do bot'
+        );
+    }
+    
+    // Comando de status
+    if (command === 'status') {
+        await message.reply(
+            `📊 **Status do Bot**\n` +
+            `• Online: ✅\n` +
+            `• Uptime: ${Math.floor(process.uptime() / 60)} minutos\n` +
+            `• Servidor: Render 🚀`
+        );
     }
 });
 
-// Login do bot principal
-mainClient.login(process.env.MAIN_BOT_TOKEN);
+// ===== LOGIN =====
+mainClient.login(token)
+    .then(() => console.log('🔑 Login realizado com sucesso!'))
+    .catch(err => {
+        console.error('❌ Erro no login:', err.message);
+        console.error('Verifique se o token está correto');
+        process.exit(1);
+    });
+
+// ===== KEEP ALIVE =====
+setInterval(() => {
+    console.log('💓 Heartbeat: Bot ativo, memória:', 
+        Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB');
+}, 10 * 60 * 1000); // A cada 10 minutos
+
+// ===== TRATAMENTO DE ERROS =====
+process.on('uncaughtException', (err) => {
+    console.error('❌ Exceção não capturada:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('❌ Promise rejeitada:', err);
+});
