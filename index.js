@@ -1,8 +1,9 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const fs = require('fs-extra');
-const path = require('path');
+
 const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 // Configuração do servidor web (para manter online)
 const app = express();
@@ -12,7 +13,7 @@ app.get('/', (req, res) => {
     res.send('✅ Pix Multi-Bot está online!');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Servidor web rodando na porta ${PORT}`);
 });
 
