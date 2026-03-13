@@ -364,7 +364,7 @@ botPrincipal.on('messageCreate', async (message) => {
     }
 });
 
-// ===== INICIAR =====
+// ===== INICIR =====
 if (!BOT_TOKEN) {
     console.error('❌ BOT_TOKEN não configurado!');
     process.exit(1);
