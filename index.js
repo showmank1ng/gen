@@ -12,7 +12,7 @@ const PREFIX = process.env.PREFIX || '!';
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_ID = process.env.ADMIN_ID;
 
-// ===== SERVIDOR WEB (para manter o serviço ativo) =====
+// ===== SERVIDOR WEB =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -24,7 +24,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Servidor web rodando na porta ${PORT}`);
 });
 
-// ===== BANCO DE DADOS (armazenado em /tmp no Railway) =====
+// ===== BANCO DE DADOS =====
 const dbPath = path.join('/tmp', 'users.json');
 
 let usuarios = [];
@@ -52,7 +52,7 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO CRC16 (cálculo real) =====
+// ===== FUNÇÃO CRC16 =====
 function calcularCRC16(payload) {
     let polinomio = 0x1021;
     let resultado = 0xFFFF;
@@ -70,70 +70,54 @@ function calcularCRC16(payload) {
     return resultado.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (padrão oficial) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX =====
 function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'DiscordBot', cidade = 'BRASILIA') {
+    console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
     try {
         if (!chave) throw new Error('Chave Pix não fornecida');
         let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // padrão: números (telefone, CPF, CNPJ)
+        let tipoChave = '01';
 
-        // Determinar tipo de chave
         if (chaveLimpa.includes('@')) {
-            tipoChave = '02'; // e-mail
+            tipoChave = '02';
         } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            tipoChave = '01'; // chave aleatória (trata como texto)
+            tipoChave = '01';
         } else {
-            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
+            chaveLimpa = chaveLimpa.replace(/\D/g, '');
         }
 
-        // Limitar tamanho da chave (máximo 30 caracteres)
         if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
         if (chaveLimpa.length === 0) throw new Error('Chave inválida após limpeza');
 
-        let payload = '';
-
-        // 00 Payload Format Indicator
-        payload += '000201';
-
-        // 26 Merchant Account Information
+        let payload = '000201';
         let gui = '0014br.gov.bcb.pix';
         let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
         let merchantAccountInfo = gui + chaveCampo;
         let tamanhoMAI = merchantAccountInfo.length.toString().padStart(2, '0');
         payload += '26' + tamanhoMAI + merchantAccountInfo;
 
-        // 52 Merchant Category Code
         payload += '52040000';
-
-        // 53 Transaction Currency
         payload += '5303986';
-
-        // 58 Country Code
         payload += '5802BR';
 
-        // 59 Merchant Name
         let nome = nomeRecebedor.substring(0, 25);
         payload += '59' + nome.length.toString().padStart(2, '0') + nome;
 
-        // 60 Merchant City
         let cid = cidade.substring(0, 15);
         payload += '60' + cid.length.toString().padStart(2, '0') + cid;
 
-        // 54 Transaction Amount (opcional)
         if (valor) {
             let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
             let valorStr = valorNum.replace('.', '');
             payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
         }
 
-        // 62 Additional Data Field (opcional) – usado para descrição
         if (descricao && descricao !== 'Pagamento via Pix') {
             let descLimpa = descricao.substring(0, 20);
             let campoAdicional = '05' + descLimpa.length.toString().padStart(2, '0') + descLimpa;
             payload += '62' + (campoAdicional.length + 2).toString().padStart(2, '0') + campoAdicional;
         }
 
-        // 63 CRC16
         let payloadSemCRC = payload;
         let crc16 = calcularCRC16(payloadSemCRC + '6304');
         payload += '6304' + crc16;
@@ -141,8 +125,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'D
         console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
         return payload;
     } catch (error) {
-        console.error('❌ Erro ao gerar payload:', error.message);
-        // Retorna um payload de fallback (chave fixa) para não quebrar o fluxo
+        console.error('❌ [gerarPayloadPix] Exceção:', error.message);
         return '0002010014br.gov.bcb.pix01111234567895204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2';
     }
 }
@@ -152,54 +135,42 @@ async function iniciarSelfBot(usuario) {
     try {
         console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
-        const client = new SelfBotClient({
-            checkUpdate: false,
-            intents: 32767 // Todas as intents
-        });
+        const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
-        // Cache para evitar mensagens duplicadas
         const mensagensProcessadas = new Set();
         setInterval(() => {
             mensagensProcessadas.clear();
-            console.log(`🧹 Cache de mensagens limpo para ${client.user.tag}`);
-        }, 10 * 60 * 1000); // limpa a cada 10 minutos
+            console.log(`🧹 Cache de mensagens limpo para ${client.user ? client.user.tag : 'desconhecido'}`);
+        }, 10 * 60 * 1000);
 
         client.on('ready', () => {
             console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
             usuario.status = 'online';
             usuario.discordTag = client.user.tag;
             salvarUsuarios();
-
-            selfBotsAtivos.set(usuario.userId, {
-                client,
-                tag: client.user.tag
-            });
+            selfBotsAtivos.set(usuario.userId, { client, tag: client.user.tag });
         });
 
         client.on('messageCreate', async (message) => {
             try {
-                // Log bruto para debug
-                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
+                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user ? client.user.tag : 'desconhecido'}] Mensagem recebida:`);
                 console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
                 console.log(`   Conteúdo: "${message.content}"`);
                 console.log(`   Canal: ${message.channel.type}`);
 
-                // Evitar duplicação: verificar se a mensagem já foi processada
                 if (mensagensProcessadas.has(message.id)) {
                     console.log(`   ⏭️ Ignorando: mensagem já processada (ID: ${message.id})`);
                     return;
                 }
                 mensagensProcessadas.add(message.id);
 
-                // Ignorar mensagens que não começam com o prefixo
                 if (!message.content.startsWith(PREFIX)) {
                     console.log(`   ⏭️ Ignorando: não começa com ${PREFIX}`);
                     return;
                 }
 
-                // Verificar se o autor é o dono da conta OU o admin
                 if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
-                    console.log(`   ⏭️ Ignorando: não é o dono (${usuario.userId}) nem o admin (${ADMIN_ID})`);
+                    console.log(`   ⏭️ Ignorando: não é o dono nem o admin`);
                     return;
                 }
 
@@ -208,19 +179,11 @@ async function iniciarSelfBot(usuario) {
 
                 console.log(`   🎯 Comando detectado: ${command}`);
 
-                // Comando !teste
                 if (command === 'teste') {
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
-                    console.log(`   ✅ Teste respondido`);
-                }
-
-                // Comando !ping
-                if (command === 'ping') {
+                } else if (command === 'ping') {
                     await message.reply('🏓 **Pong!**');
-                }
-
-                // Comando !help
-                if (command === 'help' || command === 'ajuda') {
+                } else if (command === 'help' || command === 'ajuda') {
                     await message.reply(
                         '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
                         '`!ping` - Testar conexão\n' +
@@ -230,25 +193,15 @@ async function iniciarSelfBot(usuario) {
                         '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
                         '`!help` - Mostrar esta ajuda'
                     );
-                }
-
-                // Comando !pix
-                if (command === 'pix') {
+                } else if (command === 'pix') {
                     console.log(`   🎯 Executando PIX`);
 
                     if (args.length === 0) {
-                        await message.reply(
-                            '❌ **Como usar o Pix:**\n' +
-                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
-                            '`!pix [chave] [descrição]` - Ex: `!pix 11999999999 Pizza`\n' +
-                            '`!pix [valor] [chave] [descrição]` - Ex: `!pix 50.00 11999999999 Jantar`'
-                        );
+                        await message.reply('❌ Use: `!pix [chave]` - Ex: `!pix 11999999999`');
                         return;
                     }
 
                     let chavePix, valor, descricao;
-
-                    // Verifica se o primeiro argumento é um valor (ex: 50.00)
                     if (args[0] && args[0].match(/^[\d,.]+$/)) {
                         valor = args[0].replace(',', '.');
                         chavePix = args[1];
@@ -264,25 +217,18 @@ async function iniciarSelfBot(usuario) {
                         return;
                     }
 
-                    console.log(`   🔑 Chave: ${chavePix}`);
-                    if (valor) console.log(`   💰 Valor: ${valor}`);
-                    if (descricao) console.log(`   📝 Descrição: ${descricao}`);
+                    console.log(`   🔑 Chave: ${chavePix}, Valor: ${valor}, Descrição: ${descricao}`);
 
                     const procMsg = await message.reply('🔄 **Gerando QR Code Pix...**');
 
                     try {
+                        console.log(`   📦 Chamando gerarPayloadPix...`);
                         const payload = gerarPayloadPix(chavePix, valor, descricao);
-                        console.log(`   ✅ Payload gerado, gerando QR Code...`);
+                        console.log(`   📦 Payload retornado: ${payload ? payload.substring(0, 50) + '...' : 'null'}`);
 
-                        const qrBuffer = await QRCode.toBuffer(payload, {
-                            type: 'png',
-                            width: 400,
-                            margin: 2,
-                            errorCorrectionLevel: 'M'
-                        });
+                        if (!payload || payload.length < 50) throw new Error('Payload inválido');
 
-                        console.log(`   ✅ QR Code gerado (${qrBuffer.length} bytes)`);
-
+                        const qrBuffer = await QRCode.toBuffer(payload, { type: 'png', width: 400, margin: 2 });
                         const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
 
                         let resposta = `✅ **QR CODE PIX GERADO!**\n\n`;
@@ -299,13 +245,10 @@ async function iniciarSelfBot(usuario) {
 
                         await message.reply({ content: resposta, files: [attachment] });
                         await procMsg.delete();
-
                         console.log(`   ✅ QR Code enviado com sucesso`);
 
-                        // Atualizar contador de comandos
                         usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
                         salvarUsuarios();
-
                     } catch (error) {
                         console.error(`   ❌ Erro no QR Code:`, error);
                         await procMsg.delete();
@@ -313,7 +256,7 @@ async function iniciarSelfBot(usuario) {
                     }
                 }
             } catch (error) {
-                console.error('❌ Erro no processamento da mensagem:', error);
+                console.error('❌ Erro no self-bot:', error);
             }
         });
 
@@ -335,24 +278,17 @@ async function iniciarSelfBot(usuario) {
     }
 }
 
-// ===== INICIAR TODOS OS SELF-BOTS DO BANCO =====
+// ===== INICIAR TODOS OS SELF-BOTS =====
 function iniciarTodosSelfBots() {
-    console.log(`🔄 Iniciando ${usuarios.length} self-bots do banco de dados...`);
+    console.log(`🔄 Iniciando ${usuarios.length} self-bots...`);
     for (const usuario of usuarios) {
-        if (usuario.status === 'active') {
-            setTimeout(() => iniciarSelfBot(usuario), 2000);
-        }
+        if (usuario.status === 'active') setTimeout(() => iniciarSelfBot(usuario), 2000);
     }
 }
 
-// ===== BOT PRINCIPAL (GERENCIADOR) =====
+// ===== BOT PRINCIPAL =====
 const botPrincipal = new BotPrincipalClient({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
 });
 
 botPrincipal.once('ready', () => {
@@ -362,150 +298,86 @@ botPrincipal.once('ready', () => {
 });
 
 botPrincipal.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.content.startsWith(PREFIX)) return;
+    if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
     const isAdmin = message.author.id === ADMIN_ID;
 
-    // Comando público
-    if (command === 'ping') {
-        return message.reply('🏓 Pong!');
-    }
-
-    // Comandos de admin (só para você)
+    if (command === 'ping') return message.reply('🏓 Pong!');
     if (!isAdmin) return;
 
     if (command === 'status') {
         return message.reply(
-            `📊 **STATUS DO SISTEMA**\n\n` +
-            `👥 Usuários registrados: ${usuarios.length}\n` +
-            `🟢 Self-bots online: ${selfBotsAtivos.size}\n` +
-            `🔴 Self-bots offline: ${usuarios.length - selfBotsAtivos.size}`
+            `📊 **STATUS**\n👥 Usuários: ${usuarios.length}\n🟢 Online: ${selfBotsAtivos.size}\n🔴 Offline: ${usuarios.length - selfBotsAtivos.size}`
         );
-    }
-
-    if (command === 'listar') {
-        if (usuarios.length === 0) {
-            return message.reply('📭 Nenhum usuário registrado.');
-        }
-
-        let lista = '📋 **USUÁRIOS REGISTRADOS**\n\n';
-        for (const u of usuarios) {
+    } else if (command === 'listar') {
+        if (usuarios.length === 0) return message.reply('📭 Nenhum usuário.');
+        let lista = '📋 **USUÁRIOS**\n';
+        usuarios.forEach(u => {
             const online = selfBotsAtivos.has(u.userId) ? '🟢' : '🔴';
-            lista += `${online} **${u.discordTag || u.userId}**\n`;
-            if (u.comandosUsados) lista += `   └ Comandos: ${u.comandosUsados}\n`;
-        }
+            lista += `${online} ${u.discordTag || u.userId}\n`;
+        });
         return message.reply(lista);
-    }
-
-    if (command === 'registrar') {
-        if (args.length < 2) {
-            return message.reply('❌ Use: `!registrar [ID] [token]`');
-        }
-
-        const userId = args[0];
-        const userToken = args[1];
-
-        const msgProc = await message.reply('🔄 Processando registro...');
+    } else if (command === 'registrar') {
+        if (args.length < 2) return message.reply('❌ Use: `!registrar [ID] [token]`');
+        const userId = args[0], userToken = args[1];
+        const msgProc = await message.reply('🔄 Processando...');
 
         try {
-            // Verificar duplicidade
-            if (usuarios.some(u => u.userId === userId)) {
-                return msgProc.edit('❌ Este usuário já está registrado!');
-            }
+            if (usuarios.some(u => u.userId === userId)) return msgProc.edit('❌ Usuário já registrado!');
 
-            // Testar token
             const testClient = new SelfBotClient({ checkUpdate: false });
             let userTag;
             try {
                 await testClient.login(userToken);
                 userTag = testClient.user.tag;
                 await testClient.destroy();
-            } catch (err) {
+            } catch {
                 return msgProc.edit('❌ Token inválido!');
             }
 
-            const novoUsuario = {
-                userId,
-                discordTag: userTag,
-                userToken,
-                status: 'active',
-                registradoEm: new Date().toISOString(),
-                comandosUsados: 0
-            };
-
+            const novoUsuario = { userId, discordTag: userTag, userToken, status: 'active', registradoEm: new Date().toISOString(), comandosUsados: 0 };
             usuarios.push(novoUsuario);
             salvarUsuarios();
 
             const iniciou = await iniciarSelfBot(novoUsuario);
-
-            await msgProc.edit(
-                `✅ **USUÁRIO REGISTRADO COM SUCESSO!**\n\n` +
-                `• Usuário: **${userTag}**\n` +
-                `• Self-bot: ${iniciou ? '🟢 Online' : '🟡 Iniciando...'}\n\n` +
-                `📱 O usuário agora pode usar os comandos em QUALQUER lugar do Discord!\n` +
-                `   (teste com \`!teste\` e \`!pix 11999999999\`)`
-            );
+            await msgProc.edit(`✅ **USUÁRIO REGISTRADO!**\n• Usuário: **${userTag}**\n• Self-bot: ${iniciou ? '🟢 Online' : '🟡 Iniciando...'}`);
         } catch (error) {
             console.error('Erro no registro:', error);
             await msgProc.edit(`❌ Erro: ${error.message}`);
         }
-    }
-
-    if (command === 'remover') {
-        if (args.length < 1) {
-            return message.reply('❌ Use: `!remover [ID]`');
-        }
-
+    } else if (command === 'remover') {
+        if (args.length < 1) return message.reply('❌ Use: `!remover [ID]`');
         const userId = args[0];
         const index = usuarios.findIndex(u => u.userId === userId);
+        if (index === -1) return message.reply('❌ Usuário não encontrado!');
 
-        if (index === -1) {
-            return message.reply('❌ Usuário não encontrado!');
-        }
-
-        const userTag = usuarios[index].discordTag;
-
-        // Desconectar self-bot se estiver online
         if (selfBotsAtivos.has(userId)) {
-            try {
-                await selfBotsAtivos.get(userId).client.destroy();
-                selfBotsAtivos.delete(userId);
-            } catch (err) {
-                console.error('Erro ao desconectar:', err);
-            }
+            try { await selfBotsAtivos.get(userId).client.destroy(); } catch {}
+            selfBotsAtivos.delete(userId);
         }
-
+        const userTag = usuarios[index].discordTag;
         usuarios.splice(index, 1);
         salvarUsuarios();
-
-        await message.reply(`✅ Usuário **${userTag}** removido com sucesso!`);
+        await message.reply(`✅ Usuário **${userTag}** removido!`);
     }
 });
 
-// ===== INICIAR BOT PRINCIPAL =====
+// ===== INICIAR =====
 if (!BOT_TOKEN) {
-    console.error('❌ BOT_TOKEN não configurado nas variáveis de ambiente!');
+    console.error('❌ BOT_TOKEN não configurado!');
     process.exit(1);
 }
-
 botPrincipal.login(BOT_TOKEN).catch(err => {
-    console.error('❌ Erro no login do bot principal:', err);
+    console.error('❌ Erro no login:', err);
     process.exit(1);
 });
 
-// ===== HEARTBEAT (manutenção) =====
+// ===== HEARTBEAT =====
 setInterval(() => {
     console.log(`💓 Heartbeat - Usuários: ${usuarios.length} | Online: ${selfBotsAtivos.size}`);
 }, 60000);
 
-// ===== TRATAMENTO DE ERROS NÃO CAPTURADOS =====
-process.on('uncaughtException', (err) => {
-    console.error('❌ Exceção não capturada:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-    console.error('❌ Promise rejeitada:', err);
-});
+process.on('uncaughtException', console.error);
+process.on('unhandledRejection', console.error);
