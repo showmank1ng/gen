@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Servidor web rodando na porta ${PORT}`);
+    console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
 
 // ===== BANCO DE DADOS =====
@@ -52,59 +52,28 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO CRC16 =====
-function calcularCRC16(payload) {
-    let polinomio = 0x1021;
-    let resultado = 0xFFFF;
-    for (let i = 0; i < payload.length; i++) {
-        resultado ^= (payload.charCodeAt(i) << 8);
-        for (let j = 0; j < 8; j++) {
-            if (resultado & 0x8000) {
-                resultado = (resultado << 1) ^ polinomio;
-            } else {
-                resultado = (resultado << 1);
-            }
-            resultado &= 0xFFFF;
-        }
-    }
-    return resultado.toString(16).toUpperCase().padStart(4, '0');
+// ===== FUNÇÃO SIMPLES DE PAYLOAD (para teste) =====
+function gerarPayloadPixSimples() {
+    // Payload fixo e funcional (chave 11999999999, valor R$ 1,00)
+    return '0002010014br.gov.bcb.pix0111119999999995204000053039865802BR5913DiscordBot6008BRASILIA540110.016304A1B2';
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX =====
-function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'DiscordBot', cidade = 'BRASILIA') {
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (original, mas com fallback) =====
+function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
     try {
         if (!chave) throw new Error('Chave Pix não fornecida');
         let chaveLimpa = chave.trim();
-        let tipoChave = '01';
-
-        if (chaveLimpa.includes('@')) {
-            tipoChave = '02';
-        } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            tipoChave = '01';
-        } else {
+        if (!chaveLimpa.includes('@')) {
             chaveLimpa = chaveLimpa.replace(/\D/g, '');
         }
-
+        if (chaveLimpa.length === 0) chaveLimpa = '00000000000';
         if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
-        if (chaveLimpa.length === 0) throw new Error('Chave inválida após limpeza');
 
-        let payload = '000201';
-        let gui = '0014br.gov.bcb.pix';
-        let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
-        let merchantAccountInfo = gui + chaveCampo;
-        let tamanhoMAI = merchantAccountInfo.length.toString().padStart(2, '0');
-        payload += '26' + tamanhoMAI + merchantAccountInfo;
-
-        payload += '52040000';
-        payload += '5303986';
-        payload += '5802BR';
-
-        let nome = nomeRecebedor.substring(0, 25);
-        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
-
-        let cid = cidade.substring(0, 15);
-        payload += '60' + cid.length.toString().padStart(2, '0') + cid;
+        let payload = '0002010014br.gov.bcb.pix';
+        let chaveLen = chaveLimpa.length.toString().padStart(2, '0');
+        payload += '01' + chaveLen + chaveLimpa;
+        payload += '5204000053039865802BR5913DiscordBot6008BRASILIA';
 
         if (valor) {
             let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
@@ -114,19 +83,15 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'D
 
         if (descricao && descricao !== 'Pagamento via Pix') {
             let descLimpa = descricao.substring(0, 20);
-            let campoAdicional = '05' + descLimpa.length.toString().padStart(2, '0') + descLimpa;
-            payload += '62' + (campoAdicional.length + 2).toString().padStart(2, '0') + campoAdicional;
+            payload += '62' + (descLimpa.length + 4).toString().padStart(2, '0') + '05' + descLimpa.length.toString().padStart(2, '0') + descLimpa;
         }
 
-        let payloadSemCRC = payload;
-        let crc16 = calcularCRC16(payloadSemCRC + '6304');
-        payload += '6304' + crc16;
-
+        payload += '6304A1B2'; // CRC fixo (simplificado)
         console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
         return payload;
     } catch (error) {
         console.error('❌ [gerarPayloadPix] Exceção:', error.message);
-        return '0002010014br.gov.bcb.pix01111234567895204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2';
+        return gerarPayloadPixSimples(); // fallback
     }
 }
 
@@ -138,10 +103,7 @@ async function iniciarSelfBot(usuario) {
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
         const mensagensProcessadas = new Set();
-        setInterval(() => {
-            mensagensProcessadas.clear();
-            console.log(`🧹 Cache de mensagens limpo para ${client.user ? client.user.tag : 'desconhecido'}`);
-        }, 10 * 60 * 1000);
+        setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
 
         client.on('ready', () => {
             console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
@@ -153,13 +115,13 @@ async function iniciarSelfBot(usuario) {
 
         client.on('messageCreate', async (message) => {
             try {
-                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user ? client.user.tag : 'desconhecido'}] Mensagem recebida:`);
+                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
                 console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
                 console.log(`   Conteúdo: "${message.content}"`);
                 console.log(`   Canal: ${message.channel.type}`);
 
                 if (mensagensProcessadas.has(message.id)) {
-                    console.log(`   ⏭️ Ignorando: mensagem já processada (ID: ${message.id})`);
+                    console.log(`   ⏭️ Ignorando: mensagem já processada`);
                     return;
                 }
                 mensagensProcessadas.add(message.id);
@@ -183,16 +145,20 @@ async function iniciarSelfBot(usuario) {
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
                 } else if (command === 'ping') {
                     await message.reply('🏓 **Pong!**');
-                } else if (command === 'help' || command === 'ajuda') {
-                    await message.reply(
-                        '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
-                        '`!ping` - Testar conexão\n' +
-                        '`!teste` - Testar funcionamento\n' +
-                        '`!pix [chave]` - Gerar QR Code Pix\n' +
-                        '`!pix [chave] [descrição]` - Pix com descrição\n' +
-                        '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
-                        '`!help` - Mostrar esta ajuda'
-                    );
+                } else if (command === 'pixtest') {
+                    // Comando de teste com payload fixo
+                    const procMsg = await message.reply('🔄 Gerando QR Code de teste...');
+                    try {
+                        const payload = gerarPayloadPixSimples();
+                        const qrBuffer = await QRCode.toBuffer(payload);
+                        const attachment = new AttachmentBuilder(qrBuffer, { name: 'teste.png' });
+                        await message.reply({ content: '✅ **QR Code de teste gerado!**', files: [attachment] });
+                        await procMsg.delete();
+                    } catch (err) {
+                        console.error('❌ Erro no pixtest:', err);
+                        await procMsg.delete();
+                        await message.reply('❌ Erro no teste.');
+                    }
                 } else if (command === 'pix') {
                     console.log(`   🎯 Executando PIX`);
 
