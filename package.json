@@ -1,7 +1,6 @@
 {
-  "name": "pix-multi-bot",
+  "name": "pix-bot",
   "version": "1.0.0",
-  "description": "Bot Pix Multi-Usuário",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,7 +10,6 @@
     "discord.js-selfbot-v13": "latest",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "fs-extra": "^11.2.0",
     "qrcode": "^1.5.3"
   }
 }
