@@ -1,12 +1,13 @@
 {
   "name": "pix-multi-bot",
   "version": "2.0.0",
-  "description": "Bot Pix Multi-Usuário - Registre qualquer usuário",
+  "description": "Bot Pix Multi-Usuário",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
+    "discord.js": "^14.14.1",
     "discord.js-selfbot-v13": "3.1.4",
     "express": "^4.18.2",
     "qrcode": "^1.5.3",
