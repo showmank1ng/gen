@@ -223,64 +223,161 @@ mainClient.on('messageCreate', async (message) => {
         await message.reply(lista);
     }
 
-    // !registrar - Registrar novo usuário
-    if (command === 'registrar') {
-        if (message.author.id !== ADMIN_ID) {
-            return message.reply('❌ Apenas o administrador pode usar este comando!');
-        }
-
-        if (args.length < 2) {
-            return message.reply('❌ Use: `!registrar [ID] [token]`');
-        }
-
-        const userId = args[0];
-        const userToken = args[1];
-
-        try {
-            // Testar token
-            const { Client: TestClient } = require('discord.js-selfbot-v13');
-            const testClient = new TestClient({ checkUpdate: false });
-            
-            let userTag = 'Desconhecido';
-            
-            try {
-                await testClient.login(userToken);
-                userTag = testClient.user.tag;
-                await testClient.destroy();
-            } catch (err) {
-                return message.reply('❌ Token inválido!');
-            }
-
-            // Salvar no banco
-            const db = fs.readJsonSync(usersDbPath);
-            
-            const newUser = {
-                userId,
-                discordTag: userTag,
-                userToken,
-                status: 'active',
-                registeredAt: new Date().toISOString(),
-                commandsUsed: 0
-            };
-
-            db.users.push(newUser);
-            fs.writeJsonSync(usersDbPath, db);
-
-            // Iniciar self-bot
-            const started = await startSelfBot(newUser);
-
-            await message.reply(
-                `✅ **Usuário registrado!**\n\n` +
-                `• Tag: ${userTag}\n` +
-                `• ID: ${userId}\n` +
-                `• Self-bot: ${started ? '🟢 Online' : '🔴 Offline'}`
-            );
-
-        } catch (error) {
-            console.error('Erro no registro:', error);
-            await message.reply('❌ Erro ao registrar usuário');
-        }
+    /// !registrar - Registrar novo usuário (VERSÃO COM DEBUG)
+if (command === 'registrar') {
+    console.log('📝 Comando registrar recebido');
+    console.log('Autor:', message.author.tag);
+    console.log('Admin ID:', ADMIN_ID);
+    
+    // Verificar permissão
+    if (message.author.id !== ADMIN_ID) {
+        console.log('❌ Permissão negada');
+        return message.reply('❌ Apenas o administrador pode usar este comando!');
     }
+
+    // Verificar argumentos
+    if (args.length < 2) {
+        console.log('❌ Argumentos insuficientes:', args);
+        return message.reply('❌ Use: `!registrar [ID] [token]`');
+    }
+
+    const userId = args[0];
+    const userToken = args[1];
+
+    console.log('📋 Dados recebidos:');
+    console.log('  User ID:', userId);
+    console.log('  Token:', userToken ? '[PROTEGIDO]' : 'não fornecido');
+
+    try {
+        // Enviar mensagem de processamento
+        await message.reply('🔄 Processando registro...');
+
+        // TESTAR TOKEN
+        console.log('🔄 Testando token...');
+        
+        let SelfBotClient;
+        try {
+            SelfBotClient = require('discord.js-selfbot-v13').Client;
+            console.log('✅ Biblioteca selfbot carregada');
+        } catch (err) {
+            console.error('❌ Erro ao carregar biblioteca:', err);
+            return message.reply('❌ Erro: biblioteca discord.js-selfbot-v13 não instalada!');
+        }
+
+        const testClient = new SelfBotClient({ 
+            checkUpdate: false,
+            http: { version: 10 }
+        });
+        
+        let userTag = 'Desconhecido';
+        
+        try {
+            console.log('🔄 Tentando login com token...');
+            await testClient.login(userToken);
+            console.log('✅ Login bem sucedido!');
+            
+            userTag = testClient.user.tag;
+            console.log('👤 Usuário:', userTag);
+            
+            await testClient.destroy();
+            console.log('✅ Cliente de teste destruído');
+            
+        } catch (loginError) {
+            console.error('❌ Erro no login:', loginError.message);
+            
+            if (loginError.message.includes('invalid token')) {
+                return message.reply('❌ Token inválido! O token fornecido não é válido.');
+            } else if (loginError.message.includes('Privileged intent')) {
+                return message.reply('❌ Erro de intent. Isso não deveria acontecer em selfbot.');
+            } else {
+                return message.reply(`❌ Erro no login: ${loginError.message}`);
+            }
+        }
+
+        // SALVAR NO BANCO
+        console.log('🔄 Salvando no banco de dados...');
+        
+        const db = fs.readJsonSync(usersDbPath);
+        console.log('📊 Banco atual tem', db.users.length, 'usuários');
+        
+        // Verificar se já existe
+        const existingUser = db.users.find(u => u.userId === userId);
+        if (existingUser) {
+            console.log('⚠️ Usuário já existe');
+            return message.reply('❌ Este usuário já está registrado!');
+        }
+
+        // Criar novo usuário
+        const newUser = {
+            userId,
+            discordTag: userTag,
+            userToken,
+            status: 'active',
+            registeredAt: new Date().toISOString(),
+            lastUsed: new Date().toISOString(),
+            commandsUsed: 0
+        };
+
+        db.users.push(newUser);
+        fs.writeJsonSync(usersDbPath, db);
+        console.log('✅ Usuário salvo no banco');
+
+        // INICIAR SELF-BOT
+        console.log('🔄 Iniciando self-bot...');
+        
+        try {
+            const selfBot = new SelfBotClient({ 
+                checkUpdate: false,
+                http: { version: 10 }
+            });
+
+            selfBot.once('ready', () => {
+                console.log(`✅ Self-bot ONLINE: ${selfBot.user.tag}`);
+                activeSelfBots.set(userId, {
+                    client: selfBot,
+                    tag: selfBot.user.tag
+                });
+            });
+
+            selfBot.on('messageCreate', async (msg) => {
+                // Comando pix no self-bot
+                if (msg.content.startsWith(PREFIX + 'pix')) {
+                    const pixArgs = msg.content.slice(PREFIX.length + 3).trim().split(/ +/);
+                    console.log('📱 Comando pix no self-bot:', pixArgs);
+                    
+                    // Aqui vai a lógica do pix (simplificada por enquanto)
+                    await msg.reply('✅ Comando pix recebido! Em breve implementarei o QR Code aqui.');
+                }
+            });
+
+            await selfBot.login(userToken);
+            console.log('✅ Self-bot iniciado com sucesso');
+
+        } catch (selfBotError) {
+            console.error('❌ Erro ao iniciar self-bot:', selfBotError.message);
+            // Não falha o registro, apenas avisa
+        }
+
+        // RESPOSTA DE SUCESSO
+        await message.reply(
+            `✅ **USUÁRIO REGISTRADO COM SUCESSO!**\n\n` +
+            `📋 **Detalhes:**\n` +
+            `• Usuário: **${userTag}**\n` +
+            `• ID: \`${userId}\`\n` +
+            `• Token: Válido ✅\n` +
+            `• Self-bot: Iniciando...\n\n` +
+            `📱 **Próximos passos:**\n` +
+            `1️⃣ Aguarde o self-bot ficar online\n` +
+            `2️⃣ Use \`!listar\` para verificar\n` +
+            `3️⃣ O usuário já pode usar \`!pix\` na própria conta`
+        );
+
+    } catch (error) {
+        console.error('❌ ERRO GERAL NO REGISTRO:', error);
+        console.error('Stack:', error.stack);
+        await message.reply(`❌ Erro ao registrar usuário: ${error.message}`);
+    }
+}
 
     // !remover - Remover usuário
     if (command === 'remover') {
