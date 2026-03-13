@@ -1,0 +1,21 @@
+{
+  "name": "pix-multi-bot",
+  "version": "2.0.0",
+  "description": "Sistema multi-usuário para gerar QR Code Pix",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "discord.js-selfbot-v13": "^3.1.4",
+    "dotenv": "^16.3.1",
+    "qrcode": "^1.5.3",
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

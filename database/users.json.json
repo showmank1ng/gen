@@ -1,0 +1,13 @@
+{
+  "users": [
+    {
+      "userId": "123456789012345678",
+      "discordTag": "Usuario#1234",
+      "userToken": "token_do_usuario_aqui",
+      "status": "active",
+      "registeredAt": "2024-01-01T00:00:00.000Z",
+      "lastUsed": "2024-01-01T00:00:00.000Z",
+      "commandsUsed": 0
+    }
+  ]
+}
