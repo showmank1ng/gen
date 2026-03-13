@@ -1,31 +1,36 @@
 require('dotenv').config();
-const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs-extra');
 const path = require('path');
+const express = require('express');
 
-// ===== CONFIGURAÇÃO DO SERVIDOR WEB =====
+// ===== SERVIDOR WEB (para Render) =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send(`
-        <html>
-            <head><title>Pix Multi Bot</title></head>
-            <body>
-                <h1>✅ Bot está online!</h1>
-                <p>Servidor rodando na porta ${PORT}</p>
-                <p><small>Render uptime: ${process.uptime().toFixed(0)}s</small></p>
-            </body>
-        </html>
-    `);
+    res.send('✅ Pix Multi-Bot está online!');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Web server: http://0.0.0.0:${PORT}`);
+    console.log(`🌐 Servidor web rodando na porta ${PORT}`);
 });
 
-// ===== CONFIGURAÇÃO DO BOT PRINCIPAL =====
+// ===== CONFIGURAÇÕES =====
+const PREFIX = process.env.PREFIX || '!';
+const ADMIN_ID = process.env.ADMIN_ID;
+const MAIN_BOT_TOKEN = process.env.MAIN_BOT_TOKEN;
+
+// ===== BANCO DE DADOS (usando /tmp no Render) =====
+const dbPath = path.join('/tmp', 'database');
+fs.ensureDirSync(dbPath);
+const usersDbPath = path.join(dbPath, 'users.json');
+
+if (!fs.existsSync(usersDbPath)) {
+    fs.writeJsonSync(usersDbPath, { users: [] });
+}
+
+// ===== CLIENTE PRINCIPAL =====
 const mainClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -35,74 +40,294 @@ const mainClient = new Client({
     ]
 });
 
-// ===== VERIFICAÇÃO DE TOKEN =====
-const token = process.env.MAIN_BOT_TOKEN;
-if (!token) {
-    console.error('❌ ERRO: MAIN_BOT_TOKEN não configurado!');
-    console.error('Adicione nas Environment Variables do Render');
+// ===== ARMAZENAR SELF-BOTS ATIVOS =====
+const activeSelfBots = new Map();
+
+// ===== FUNÇÃO PARA INICIAR SELF-BOT =====
+async function startSelfBot(userData) {
+    try {
+        console.log(`🔄 Tentando iniciar self-bot para ${userData.discordTag}...`);
+        
+        // Importar a biblioteca de self-bot
+        const { Client: SelfBotClient } = require('discord.js-selfbot-v13');
+        
+        const selfBot = new SelfBotClient({
+            checkUpdate: false,
+            readyTimeout: 60000
+        });
+
+        // Evento quando o self-bot estiver pronto
+        selfBot.once('ready', () => {
+            console.log(`✅ Self-bot ONLINE: ${selfBot.user.tag}`);
+            
+            // Atualizar status no banco
+            const db = fs.readJsonSync(usersDbPath);
+            const user = db.users.find(u => u.userId === userData.userId);
+            if (user) {
+                user.status = 'online';
+                user.lastOnline = new Date().toISOString();
+                fs.writeJsonSync(usersDbPath, db);
+            }
+            
+            // Armazenar no mapa de ativos
+            activeSelfBots.set(userData.userId, {
+                client: selfBot,
+                tag: selfBot.user.tag
+            });
+        });
+
+        // Evento para mensagens (aqui que o !pix será processado)
+        selfBot.on('messageCreate', async (message) => {
+            // Ignorar próprias mensagens
+            if (message.author.id === selfBot.user.id) return;
+            
+            // Verificar prefixo
+            if (!message.content.startsWith(PREFIX)) return;
+
+            const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+            const command = args.shift().toLowerCase();
+
+            // Comando PIX
+            if (command === 'pix') {
+                try {
+                    console.log(`📱 Comando pix recebido de ${message.author.tag}`);
+                    
+                    if (args.length === 0) {
+                        return message.reply(
+                            '❌ **Como usar o Pix:**\n' +
+                            '`!pix [chave]` - Ex: `!pix 11999999999`\n' +
+                            '`!pix [valor] [chave]` - Ex: `!pix 50.00 11999999999`'
+                        );
+                    }
+
+                    // Processar argumentos
+                    let chave, valor;
+                    if (args[0].match(/^[\d,.]+$/)) {
+                        valor = args[0].replace(',', '.');
+                        chave = args[1];
+                    } else {
+                        chave = args[0];
+                        valor = null;
+                    }
+
+                    if (!chave) {
+                        return message.reply('❌ Chave Pix não fornecida!');
+                    }
+
+                    // Gerar QR Code
+                    const QRCode = require('qrcode');
+                    const { AttachmentBuilder } = require('discord.js-selfbot-v13');
+                    
+                    // Payload simplificado
+                    const chaveLimpa = chave.replace(/\D/g, '');
+                    const payload = `0002010014br.gov.bcb.pix01${chaveLimpa.length.toString().padStart(2, '0')}${chaveLimpa}5204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2`;
+                    
+                    const qrBuffer = await QRCode.toBuffer(payload);
+                    const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
+
+                    await message.reply({
+                        content: `✅ **QR Code Pix gerado!**\nChave: \`${chave}\``,
+                        files: [attachment]
+                    });
+
+                } catch (error) {
+                    console.error('Erro no comando pix:', error);
+                    await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
+                }
+            }
+        });
+
+        // Login do self-bot
+        await selfBot.login(userData.userToken);
+        return true;
+
+    } catch (error) {
+        console.error(`❌ Erro ao iniciar self-bot para ${userData.discordTag}:`, error.message);
+        return false;
+    }
+}
+
+// ===== EVENTO: BOT PRINCIPAL PRONTO =====
+mainClient.once('ready', async () => {
+    console.log(`✅ Bot Principal ONLINE: ${mainClient.user.tag}`);
+    console.log(`📊 Carregando self-bots do banco de dados...`);
+
+    // Carregar usuários do banco
+    const db = fs.readJsonSync(usersDbPath);
+    
+    if (db.users.length === 0) {
+        console.log('📭 Nenhum usuário registrado no banco');
+    } else {
+        console.log(`📋 Encontrados ${db.users.length} usuários registrados`);
+        
+        // Iniciar cada self-bot
+        for (const user of db.users) {
+            if (user.status === 'active') {
+                await startSelfBot(user);
+                // Pequena pausa para não sobrecarregar
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    }
+});
+
+// ===== EVENTO: MENSAGENS NO BOT PRINCIPAL =====
+mainClient.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith(PREFIX)) return;
+
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    // ===== COMANDOS DE ADMIN =====
+    
+    // !ping - Teste
+    if (command === 'ping') {
+        return message.reply('🏓 Pong!');
+    }
+
+    // !status - Status do sistema
+    if (command === 'status') {
+        const db = fs.readJsonSync(usersDbPath);
+        return message.reply(
+            `📊 **STATUS DO SISTEMA**\n\n` +
+            `🤖 Bot Principal: 🟢 Online\n` +
+            `👥 Usuários registrados: ${db.users.length}\n` +
+            `🟢 Self-bots online: ${activeSelfBots.size}\n` +
+            `🔴 Self-bots offline: ${db.users.length - activeSelfBots.size}`
+        );
+    }
+
+    // !listar - Listar usuários
+    if (command === 'listar') {
+        if (message.author.id !== ADMIN_ID) {
+            return message.reply('❌ Apenas o administrador pode usar este comando!');
+        }
+
+        const db = fs.readJsonSync(usersDbPath);
+        
+        if (db.users.length === 0) {
+            return message.reply('📭 Nenhum usuário registrado.');
+        }
+
+        let lista = '📋 **USUÁRIOS REGISTRADOS**\n\n';
+        
+        for (const user of db.users) {
+            const online = activeSelfBots.has(user.userId) ? '🟢 Online' : '🔴 Offline';
+            lista += `**${user.discordTag}**\n`;
+            lista += `└ ID: \`${user.userId}\`\n`;
+            lista += `└ Status: ${online}\n`;
+            lista += `└ Comandos: ${user.commandsUsed || 0}\n\n`;
+        }
+
+        await message.reply(lista);
+    }
+
+    // !registrar - Registrar novo usuário
+    if (command === 'registrar') {
+        if (message.author.id !== ADMIN_ID) {
+            return message.reply('❌ Apenas o administrador pode usar este comando!');
+        }
+
+        if (args.length < 2) {
+            return message.reply('❌ Use: `!registrar [ID] [token]`');
+        }
+
+        const userId = args[0];
+        const userToken = args[1];
+
+        try {
+            // Testar token
+            const { Client: TestClient } = require('discord.js-selfbot-v13');
+            const testClient = new TestClient({ checkUpdate: false });
+            
+            let userTag = 'Desconhecido';
+            
+            try {
+                await testClient.login(userToken);
+                userTag = testClient.user.tag;
+                await testClient.destroy();
+            } catch (err) {
+                return message.reply('❌ Token inválido!');
+            }
+
+            // Salvar no banco
+            const db = fs.readJsonSync(usersDbPath);
+            
+            const newUser = {
+                userId,
+                discordTag: userTag,
+                userToken,
+                status: 'active',
+                registeredAt: new Date().toISOString(),
+                commandsUsed: 0
+            };
+
+            db.users.push(newUser);
+            fs.writeJsonSync(usersDbPath, db);
+
+            // Iniciar self-bot
+            const started = await startSelfBot(newUser);
+
+            await message.reply(
+                `✅ **Usuário registrado!**\n\n` +
+                `• Tag: ${userTag}\n` +
+                `• ID: ${userId}\n` +
+                `• Self-bot: ${started ? '🟢 Online' : '🔴 Offline'}`
+            );
+
+        } catch (error) {
+            console.error('Erro no registro:', error);
+            await message.reply('❌ Erro ao registrar usuário');
+        }
+    }
+
+    // !remover - Remover usuário
+    if (command === 'remover') {
+        if (message.author.id !== ADMIN_ID) {
+            return message.reply('❌ Apenas o administrador pode usar este comando!');
+        }
+
+        if (args.length < 1) {
+            return message.reply('❌ Use: `!remover [ID]`');
+        }
+
+        const userId = args[0];
+        const db = fs.readJsonSync(usersDbPath);
+        
+        const index = db.users.findIndex(u => u.userId === userId);
+        
+        if (index === -1) {
+            return message.reply('❌ Usuário não encontrado!');
+        }
+
+        // Desconectar self-bot se estiver online
+        if (activeSelfBots.has(userId)) {
+            const selfBot = activeSelfBots.get(userId).client;
+            await selfBot.destroy();
+            activeSelfBots.delete(userId);
+        }
+
+        // Remover do banco
+        db.users.splice(index, 1);
+        fs.writeJsonSync(usersDbPath, db);
+
+        await message.reply('✅ Usuário removido com sucesso!');
+    }
+});
+
+// ===== INICIAR BOT PRINCIPAL =====
+if (!MAIN_BOT_TOKEN) {
+    console.error('❌ MAIN_BOT_TOKEN não encontrado!');
     process.exit(1);
 }
 
-// ===== EVENTOS DO BOT =====
-mainClient.once('ready', () => {
-    console.log(`✅ Bot principal: ${mainClient.user.tag}`);
-    console.log(`📊 Prefixo: ${process.env.PREFIX || '!'}`);
+mainClient.login(MAIN_BOT_TOKEN).catch(err => {
+    console.error('❌ Erro no login do bot principal:', err.message);
+    process.exit(1);
 });
-
-mainClient.on('messageCreate', async message => {
-    if (message.author.bot) return;
-    
-    const prefix = process.env.PREFIX || '!';
-    if (!message.content.startsWith(prefix)) return;
-
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    // Comando de teste
-    if (command === 'ping') {
-        await message.reply('🏓 Pong!');
-    }
-    
-    // Comando de ajuda
-    if (command === 'ajuda' || command === 'help') {
-        await message.reply(
-            '**Comandos disponíveis:**\n' +
-            '`!ping` - Testar se o bot responde\n' +
-            '`!status` - Ver status do bot'
-        );
-    }
-    
-    // Comando de status
-    if (command === 'status') {
-        await message.reply(
-            `📊 **Status do Bot**\n` +
-            `• Online: ✅\n` +
-            `• Uptime: ${Math.floor(process.uptime() / 60)} minutos\n` +
-            `• Servidor: Render 🚀`
-        );
-    }
-});
-
-// ===== LOGIN =====
-mainClient.login(token)
-    .then(() => console.log('🔑 Login realizado com sucesso!'))
-    .catch(err => {
-        console.error('❌ Erro no login:', err.message);
-        console.error('Verifique se o token está correto');
-        process.exit(1);
-    });
 
 // ===== KEEP ALIVE =====
 setInterval(() => {
-    console.log('💓 Heartbeat: Bot ativo, memória:', 
-        Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB');
-}, 10 * 60 * 1000); // A cada 10 minutos
-
-// ===== TRATAMENTO DE ERROS =====
-process.on('uncaughtException', (err) => {
-    console.error('❌ Exceção não capturada:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-    console.error('❌ Promise rejeitada:', err);
-});
+    console.log(`💓 Heartbeat - Self-bots online: ${activeSelfBots.size}`);
+}, 60000);
