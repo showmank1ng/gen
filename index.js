@@ -56,24 +56,31 @@ const selfBotsAtivos = new Map();
 function gerarPayloadPix(chave, valor = null, descricao = '') {
     try {
         // Se a chave for vazia, usa um placeholder
-        if (!chave || chave.trim() === '') chave = '00000000000';
+        if (!chave) chave = '00000000000';
         
         // Limpeza: remove tudo que não for número, a menos que seja email
-        let chaveLimpa = chave.trim();
-        if (!chaveLimpa.includes('@')) {
-            chaveLimpa = chaveLimpa.replace(/\D/g, '');
+        let chaveLimpa = chave;
+        if (!chave.includes('@')) {
+            chaveLimpa = chave.replace(/\D/g, '');
         }
         // Se após limpeza ficar vazio, usa a original truncada
-        if (!chaveLimpa) chaveLimpa = chave.substring(0, 20);
+        if (!chaveLimpa || chaveLimpa.length === 0) chaveLimpa = chave.substring(0, 20);
         
         // Limitar tamanho (máximo 30 caracteres para evitar payload enorme)
         if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
         
-        // Construir payload básico (simplificado para testes)
-        let payload = '0002010014br.gov.bcb.pix';
+        // Construir payload
+        let payload = '000201'; // Payload Format Indicator
+        payload += '0014br.gov.bcb.pix'; // Merchant Account Information
+        
         const chaveLen = chaveLimpa.length.toString().padStart(2, '0');
-        payload += `01${chaveLen}${chaveLimpa}`;
-        payload += '5204000053039865802BR5913DiscordBot6008BRASILIA';
+        payload += `01${chaveLen}${chaveLimpa}`; // Chave Pix
+        
+        payload += '52040000'; // Merchant Category Code
+        payload += '5303986';   // Moeda (986 = Real)
+        payload += '5802BR';    // País
+        payload += '5913DiscordBot'; // Merchant Name
+        payload += '6008BRASILIA';   // Merchant City
         
         if (valor) {
             const valorNum = parseFloat(valor).toFixed(2);
@@ -88,39 +95,17 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         
         payload += '6304A1B2'; // CRC16 fixo (simplificado)
         
-        console.log(`   ✅ Payload gerado: ${payload.substring(0, 50)}... (tamanho: ${payload.length})`);
+        console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
         return payload;
     } catch (error) {
         console.error('❌ Erro ao gerar payload:', error);
-        // Retorna um payload padrão de fallback
+        // Retorna um payload de fallback (chave fixa)
         return '0002010014br.gov.bcb.pix01111234567895204000053039865802BR5913DiscordBot6008BRASILIA6304A1B2';
-    }
-}
-
-// ===== FUNÇÃO PARA GERAR QR CODE COM TRATAMENTO DE ERRO =====
-async function gerarQRCodeBuffer(payload) {
-    try {
-        const buffer = await QRCode.toBuffer(payload, {
-            type: 'png',
-            width: 400,
-            margin: 2,
-            errorCorrectionLevel: 'M'
-        });
-        return buffer;
-    } catch (error) {
-        console.error('❌ Erro na geração do QR Code (toBuffer):', error);
-        throw error;
     }
 }
 
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
-    // Evitar duplicatas
-    if (selfBotsAtivos.has(usuario.userId)) {
-        console.log(`⚠️ Self-bot para ${usuario.discordTag} já está ativo. Pulando.`);
-        return true;
-    }
-
     try {
         console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
@@ -139,15 +124,12 @@ async function iniciarSelfBot(usuario) {
                 client,
                 tag: client.user.tag
             });
-
-            // Envia uma mensagem de teste para si mesmo (opcional, descomentar se quiser)
-            // client.users.fetch(usuario.userId).then(user => user.send('Bot iniciado!')).catch(console.error);
         });
 
-        // ===== PROCESSAR COMANDOS NO SELF-BOT =====
+        // Processar mensagens
         client.on('messageCreate', async (message) => {
             try {
-                // Log bruto
+                // Log bruto para debug
                 console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
                 console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
                 console.log(`   Conteúdo: "${message.content}"`);
@@ -171,22 +153,20 @@ async function iniciarSelfBot(usuario) {
 
                 console.log(`   🎯 Comando detectado: ${command}`);
 
-                // Comando !teste
+                // ===== COMANDO !teste =====
                 if (command === 'teste') {
                     console.log(`   ✅ Executando TESTE`);
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
                     console.log(`   ✅ Teste respondido`);
-                    return;
                 }
 
-                // Comando !ping
+                // ===== COMANDO !ping =====
                 if (command === 'ping') {
                     console.log(`   ✅ Executando PING`);
-                    await message.reply('🏓 **Pong!**`);
-                    return;
+                    await message.reply('🏓 **Pong!**');
                 }
 
-                // Comando !help
+                // ===== COMANDO !help =====
                 if (command === 'help' || command === 'ajuda') {
                     await message.reply(
                         '📋 **COMANDOS DISPONÍVEIS:**\n\n' +
@@ -197,10 +177,9 @@ async function iniciarSelfBot(usuario) {
                         '`!pix [valor] [chave] [descrição]` - Pix com valor\n' +
                         '`!help` - Mostrar esta ajuda'
                     );
-                    return;
                 }
 
-                // Comando !pix
+                // ===== COMANDO !pix =====
                 if (command === 'pix') {
                     console.log(`   🎯 Executando PIX`);
 
@@ -242,12 +221,19 @@ async function iniciarSelfBot(usuario) {
                         // Gerar payload
                         const payload = gerarPayloadPix(chavePix, valor, descricao);
                         if (!payload) {
-                            throw new Error('Payload gerado é null');
+                            throw new Error('Payload nulo');
                         }
-                        console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
+                        
+                        console.log(`   ✅ Payload gerado, gerando QR Code...`);
 
                         // Gerar QR Code
-                        const qrBuffer = await gerarQRCodeBuffer(payload);
+                        const qrBuffer = await QRCode.toBuffer(payload, {
+                            type: 'png',
+                            width: 400,
+                            margin: 2
+                        });
+
+                        console.log(`   ✅ QR Code gerado (${qrBuffer.length} bytes)`);
 
                         const attachment = new AttachmentBuilder(qrBuffer, { name: 'pix.png' });
 
@@ -268,21 +254,16 @@ async function iniciarSelfBot(usuario) {
 
                         console.log(`   ✅ QR Code enviado com sucesso`);
 
-                        // Atualizar contador
+                        // Atualizar contador de comandos
                         usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
                         salvarUsuarios();
 
                     } catch (error) {
                         console.error(`   ❌ Erro no QR Code:`, error);
-                        console.error(`   Stack:`, error.stack);
                         await procMsg.delete();
                         await message.reply('❌ Erro ao gerar QR Code. Tente novamente.');
                     }
-                    return;
                 }
-
-                // Se chegou aqui, comando não reconhecido
-                console.log(`   ⏭️ Comando não reconhecido`);
             } catch (error) {
                 console.error('❌ Erro no processamento da mensagem:', error);
             }
@@ -340,13 +321,13 @@ botPrincipal.on('messageCreate', async (message) => {
     const command = args.shift().toLowerCase();
     const isAdmin = message.author.id === ADMIN_ID;
 
+    // Comando público
     if (command === 'ping') {
         return message.reply('🏓 Pong!');
     }
 
-    if (!isAdmin) {
-        return message.reply('❌ Apenas o administrador pode usar este comando.');
-    }
+    // Comandos de admin
+    if (!isAdmin) return;
 
     if (command === 'status') {
         return message.reply(
@@ -464,3 +445,12 @@ botPrincipal.login(BOT_TOKEN).catch(err => {
 setInterval(() => {
     console.log(`💓 Heartbeat - Usuários: ${usuarios.length} | Online: ${selfBotsAtivos.size}`);
 }, 60000);
+
+// ===== TRATAMENTO DE ERROS NÃO CAPTURADOS =====
+process.on('uncaughtException', (err) => {
+    console.error('❌ Exceção não capturada:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('❌ Promise rejeitada:', err);
+});
