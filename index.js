@@ -118,11 +118,7 @@ async function iniciarSelfBot(usuario) {
             console.log(`   ID do Dono esperado: ${usuario.userId}`);
 
             try {
-                // 1. Ignorar próprias mensagens
-                if (message.author.id === client.user.id) {
-                    console.log(`   ⏭️ Ignorando própria mensagem`);
-                    return;
-                }
+            
 
                 // 2. Verificar se é o dono da conta
                 if (message.author.id !== usuario.userId) {
