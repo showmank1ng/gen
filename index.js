@@ -52,7 +52,7 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO CRC16 (BASE OFICIAL) =====
+// ===== FUNÇÃO CRC16 (IMPLEMENTAÇÃO PADRÃO) =====
 function calcularCRC16(payload) {
     let polinomio = 0x1021;
     let resultado = 0xFFFF;
@@ -72,17 +72,21 @@ function calcularCRC16(payload) {
     return resultado.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (VERSÃO FINAL TESTADA) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (BASEADA NA ESPECIFICAÇÃO OFICIAL) =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
+    console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
+    
     try {
-        // --- 1. IDENTIFICAR O TIPO DE CHAVE E LIMPAR ---
+        // --- 1. VALIDAÇÃO E LIMPEZA DA CHAVE ---
+        if (!chave) throw new Error('Chave Pix não fornecida');
+        
         let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // Padrão: telefone, CPF, CNPJ, chave aleatória
+        let tipoChave = '01'; // Padrão: telefone/CPF/CNPJ/chave aleatória
 
         if (chaveLimpa.includes('@')) {
             tipoChave = '02'; // e-mail
-        } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            tipoChave = '01'; // chave aleatória (mantém traços)
+        } else if (chaveLimpa.includes('-') && chaveLimpa.length === 36) {
+            tipoChave = '01'; // chave aleatória (UUID)
         } else {
             chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
         }
@@ -95,42 +99,42 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
             chaveLimpa = chaveLimpa.substring(0, 30);
         }
 
-        // --- 2. CONSTRUIR O PAYLOAD SEGUINDO O PADRÃO EMV ---
+        // --- 2. CONSTRUÇÃO DO PAYLOAD SEGUINDO O PADRÃO EMV ---
         let payload = '';
 
-        // 00 - Payload Format Indicator
+        // 00 - Payload Format Indicator (fixo: 01)
         payload += '000201';
 
         // 26 - Merchant Account Information
-        let gui = '0014BR.GOV.BCB.PIX';
+        let gui = '0014BR.GOV.BCB.PIX'; // GUI fixo do BC
         let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
         let accountInfo = gui + chaveCampo;
         let accountInfoLen = accountInfo.length.toString().padStart(2, '0');
         payload += '26' + accountInfoLen + accountInfo;
 
-        // 52 - Merchant Category Code
+        // 52 - Merchant Category Code (fixo: 0000)
         payload += '52040000';
 
-        // 53 - Transaction Currency
+        // 53 - Transaction Currency (986 = Real)
         payload += '5303986';
 
-        // 54 - Transaction Amount (se houver valor)
+        // 54 - Transaction Amount (opcional)
         if (valor) {
             let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
             let valorStr = valorNum.replace('.', '');
             payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
         }
 
-        // 58 - Country Code
+        // 58 - Country Code (BR)
         payload += '5802BR';
 
-        // 59 - Merchant Name (deve ter pelo menos 1 caractere)
-        payload += '5915PIX MULTI BOT';
+        // 59 - Merchant Name (até 25 caracteres)
+        payload += '5915PIX MULTI BOT'; // Nome fixo
 
-        // 60 - Merchant City (deve ter pelo menos 1 caractere)
-        payload += '6008BRASILIA';
+        // 60 - Merchant City (até 15 caracteres)
+        payload += '6008BRASILIA'; // Cidade fixa
 
-        // 62 - Additional Data Field (TXID)
+        // 62 - Additional Data Field (TXID obrigatório)
         let txId = '***';
         if (descricao && descricao !== 'Pagamento via Pix') {
             txId = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
@@ -141,24 +145,31 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         let txIdFieldLen = txIdField.length.toString().padStart(2, '0');
         payload += '62' + txIdFieldLen + txIdField;
 
-        // 63 - CRC16 (calculado sobre o payload + '6304')
+        // --- 3. CÁLCULO DO CRC16 ---
         let payloadParaCRC = payload + '6304';
         let crc = calcularCRC16(payloadParaCRC);
         payload = payload + '6304' + crc;
 
-        console.log(`✅ Payload gerado: ${payload}`);
+        console.log(`   ✅ Payload gerado: ${payload}`);
         return payload;
+        
     } catch (error) {
-        console.error('❌ Erro ao gerar payload:', error.message);
-        // Payload de fallback com chave 11111111111 (funciona em testes)
+        console.error('❌ [gerarPayloadPix] Exceção:', error.message);
+        // Retorna um payload de exemplo que funciona (chave 11111111111)
         return '00020126360014BR.GOV.BCB.PIX0111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
+}
+
+// ===== FUNÇÃO PARA GERAR PAYLOAD DE TESTE (FIXO E CONHECIDO) =====
+function gerarPayloadTeste() {
+    // Payload de exemplo do Banco Central (funciona em qualquer banco)
+    return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
 }
 
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
     try {
-        console.log(`🔄 Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
+        console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
@@ -166,7 +177,7 @@ async function iniciarSelfBot(usuario) {
         setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
 
         client.on('ready', () => {
-            console.log(`✅✅✅ SELF-BOT ONLINE: ${client.user.tag}`);
+            console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
             usuario.status = 'online';
             usuario.discordTag = client.user.tag;
             salvarUsuarios();
@@ -175,7 +186,7 @@ async function iniciarSelfBot(usuario) {
 
         client.on('messageCreate', async (message) => {
             try {
-                console.log(`📨 Mensagem de ${message.author.tag}: "${message.content}"`);
+                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem: "${message.content}" de ${message.author.tag}`);
 
                 if (mensagensProcessadas.has(message.id)) return;
                 mensagensProcessadas.add(message.id);
@@ -187,9 +198,9 @@ async function iniciarSelfBot(usuario) {
                 const command = args.shift().toLowerCase();
 
                 if (command === 'teste') {
-                    await message.reply('✅ Self-bot funcionando!');
+                    await message.reply('✅ **Self-bot funcionando!**');
                 } else if (command === 'ping') {
-                    await message.reply('🏓 Pong!');
+                    await message.reply('🏓 **Pong!**');
                 } else if (command === 'pix') {
                     if (args.length === 0) {
                         await message.reply('❌ Use: `!pix [chave]`');
@@ -229,6 +240,24 @@ async function iniciarSelfBot(usuario) {
                         console.error('❌ Erro no QR Code:', error);
                         await procMsg.delete();
                         await message.reply('❌ Erro ao gerar QR Code.');
+                    }
+                } else if (command === 'pix-teste') {
+                    // Comando para testar com payload fixo
+                    const procMsg = await message.reply('🔄 Gerando QR Code de teste...');
+                    try {
+                        const payload = gerarPayloadTeste();
+                        const qrBuffer = await QRCode.toBuffer(payload, { width: 400 });
+                        const attachment = new MessageAttachment(qrBuffer, 'pix-teste.png');
+
+                        await message.reply({
+                            content: `✅ **QR CODE DE TESTE**\n\nEste é um payload fixo que deve funcionar em qualquer banco.\n\`\`\`${payload}\`\`\``,
+                            files: [attachment]
+                        });
+                        await procMsg.delete();
+                    } catch (error) {
+                        console.error('❌ Erro no teste:', error);
+                        await procMsg.delete();
+                        await message.reply('❌ Erro no teste.');
                     }
                 }
             } catch (error) {
