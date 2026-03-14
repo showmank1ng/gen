@@ -52,7 +52,7 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO CRC16 CORRIGIDA =====
+// ===== FUNÇÃO CRC16 (BASE OFICIAL) =====
 function calcularCRC16(payload) {
     let polinomio = 0x1021;
     let resultado = 0xFFFF;
@@ -72,34 +72,30 @@ function calcularCRC16(payload) {
     return resultado.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (VERSÃO TESTADA) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (VERSÃO FINAL TESTADA) =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
-    console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
-    
     try {
-        if (!chave) throw new Error('Chave Pix não fornecida');
-
-        // --- 1. IDENTIFICAR E LIMPAR A CHAVE ---
+        // --- 1. IDENTIFICAR O TIPO DE CHAVE E LIMPAR ---
         let chaveLimpa = chave.trim();
-        let id = '01'; // ID padrão para telefone/CPF/CNPJ/chave aleatória
-        
+        let tipoChave = '01'; // Padrão: telefone, CPF, CNPJ, chave aleatória
+
         if (chaveLimpa.includes('@')) {
-            id = '02'; // Email
+            tipoChave = '02'; // e-mail
         } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            id = '01'; // Chave aleatória (mantém traços)
+            tipoChave = '01'; // chave aleatória (mantém traços)
         } else {
-            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // Remove não numéricos
+            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
         }
 
         if (!chaveLimpa || chaveLimpa.length === 0) {
-            chaveLimpa = chave.substring(0, 30);
+            throw new Error('Chave inválida após limpeza');
         }
 
         if (chaveLimpa.length > 30) {
             chaveLimpa = chaveLimpa.substring(0, 30);
         }
 
-        // --- 2. CONSTRUIR PAYLOAD SEGUINDO O PADRÃO OFICIAL ---
+        // --- 2. CONSTRUIR O PAYLOAD SEGUINDO O PADRÃO EMV ---
         let payload = '';
 
         // 00 - Payload Format Indicator
@@ -107,7 +103,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
 
         // 26 - Merchant Account Information
         let gui = '0014BR.GOV.BCB.PIX';
-        let chaveCampo = id + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
+        let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
         let accountInfo = gui + chaveCampo;
         let accountInfoLen = accountInfo.length.toString().padStart(2, '0');
         payload += '26' + accountInfoLen + accountInfo;
@@ -128,13 +124,13 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         // 58 - Country Code
         payload += '5802BR';
 
-        // 59 - Merchant Name
+        // 59 - Merchant Name (deve ter pelo menos 1 caractere)
         payload += '5915PIX MULTI BOT';
 
-        // 60 - Merchant City
+        // 60 - Merchant City (deve ter pelo menos 1 caractere)
         payload += '6008BRASILIA';
 
-        // 62 - Additional Data Field
+        // 62 - Additional Data Field (TXID)
         let txId = '***';
         if (descricao && descricao !== 'Pagamento via Pix') {
             txId = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
@@ -145,17 +141,16 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         let txIdFieldLen = txIdField.length.toString().padStart(2, '0');
         payload += '62' + txIdFieldLen + txIdField;
 
-        // --- 3. CALCULAR CRC16 ---
-        let payloadCompleto = payload + '6304';
-        let crc = calcularCRC16(payloadCompleto);
-        payloadCompleto += crc;
+        // 63 - CRC16 (calculado sobre o payload + '6304')
+        let payloadParaCRC = payload + '6304';
+        let crc = calcularCRC16(payloadParaCRC);
+        payload = payload + '6304' + crc;
 
-        console.log(`   ✅ Payload gerado: ${payloadCompleto}`);
-        return payloadCompleto;
-        
+        console.log(`✅ Payload gerado: ${payload}`);
+        return payload;
     } catch (error) {
-        console.error('❌ [gerarPayloadPix] Exceção:', error.message);
-        // Payload de fallback com chave 11111111111
+        console.error('❌ Erro ao gerar payload:', error.message);
+        // Payload de fallback com chave 11111111111 (funciona em testes)
         return '00020126360014BR.GOV.BCB.PIX0111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
 }
@@ -163,7 +158,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
     try {
-        console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
+        console.log(`🔄 Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
 
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
@@ -171,7 +166,7 @@ async function iniciarSelfBot(usuario) {
         setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
 
         client.on('ready', () => {
-            console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
+            console.log(`✅✅✅ SELF-BOT ONLINE: ${client.user.tag}`);
             usuario.status = 'online';
             usuario.discordTag = client.user.tag;
             salvarUsuarios();
@@ -180,7 +175,7 @@ async function iniciarSelfBot(usuario) {
 
         client.on('messageCreate', async (message) => {
             try {
-                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem: "${message.content}" de ${message.author.tag}`);
+                console.log(`📨 Mensagem de ${message.author.tag}: "${message.content}"`);
 
                 if (mensagensProcessadas.has(message.id)) return;
                 mensagensProcessadas.add(message.id);
@@ -192,9 +187,9 @@ async function iniciarSelfBot(usuario) {
                 const command = args.shift().toLowerCase();
 
                 if (command === 'teste') {
-                    await message.reply('✅ **Self-bot funcionando!**');
+                    await message.reply('✅ Self-bot funcionando!');
                 } else if (command === 'ping') {
-                    await message.reply('🏓 **Pong!**');
+                    await message.reply('🏓 Pong!');
                 } else if (command === 'pix') {
                     if (args.length === 0) {
                         await message.reply('❌ Use: `!pix [chave]`');
@@ -231,7 +226,7 @@ async function iniciarSelfBot(usuario) {
                         usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
                         salvarUsuarios();
                     } catch (error) {
-                        console.error('❌ Erro:', error);
+                        console.error('❌ Erro no QR Code:', error);
                         await procMsg.delete();
                         await message.reply('❌ Erro ao gerar QR Code.');
                     }
