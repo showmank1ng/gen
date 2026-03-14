@@ -361,7 +361,7 @@ botPrincipal.login(BOT_TOKEN).catch(err => {
     process.exit(1);
 });
 
-// ===== HEARTBEAT =====
+// ===== HEARTBEAaa =====
 setInterval(() => {
     console.log(`💓 Heartbeat - Usuários: ${usuarios.length} | Online: ${selfBotsAtivos.size}`);
 }, 60000);
