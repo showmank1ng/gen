@@ -96,11 +96,11 @@ async function iniciarSelfBot(usuario) {
 
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
-        // Cache para evitar mensagens duplicadas (usando Set com limpeza periódica)
+        // Cache para evitar mensagens duplicadas (Set com limpeza periódica)
         const mensagensProcessadas = new Set();
         setInterval(() => {
+            console.log(`🧹 [${client.user ? client.user.tag : 'desconhecido'}] Limpando cache de mensagens (${mensagensProcessadas.size} itens)`);
             mensagensProcessadas.clear();
-            console.log(`🧹 Cache de mensagens limpo para ${client.user ? client.user.tag : 'desconhecido'}`);
         }, 10 * 60 * 1000); // Limpa a cada 10 minutos
 
         client.on('ready', () => {
@@ -113,20 +113,21 @@ async function iniciarSelfBot(usuario) {
 
         client.on('messageCreate', async (message) => {
             try {
-                // Log da mensagem recebida
-                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem recebida:`);
+                // Log detalhado da mensagem recebida
+                console.log(`\n📥 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem ID: ${message.id} recebida`);
                 console.log(`   Autor: ${message.author.tag} (${message.author.id})`);
                 console.log(`   Conteúdo: "${message.content}"`);
-                console.log(`   ID da mensagem: ${message.id}`);
+                console.log(`   Canal: ${message.channel.type}`);
 
-                // Verificar duplicação pelo ID da mensagem
+                // ===== VERIFICAÇÃO DE DUPLICAÇÃO =====
                 if (mensagensProcessadas.has(message.id)) {
-                    console.log(`   ⏭️ Mensagem duplicada ignorada (ID: ${message.id})`);
+                    console.log(`   ⚠️⚠️⚠️ DUPLICATA DETECTADA! Mensagem ID ${message.id} já foi processada. Ignorando.`);
                     return;
                 }
                 mensagensProcessadas.add(message.id);
+                console.log(`   ✅ Mensagem ID ${message.id} adicionada ao cache.`);
 
-                // Ignorar mensagens do próprio bot
+                // Ignorar próprias mensagens
                 if (message.author.id === client.user.id) {
                     console.log(`   ⏭️ Ignorando própria mensagem`);
                     return;
@@ -138,9 +139,9 @@ async function iniciarSelfBot(usuario) {
                     return;
                 }
 
-                // Verificar se é o dono ou admin
+                // Verificar se é o dono da conta ou o admin
                 if (message.author.id !== usuario.userId && message.author.id !== ADMIN_ID) {
-                    console.log(`   ⏭️ Ignorando: não é o dono nem o admin`);
+                    console.log(`   ⏭️ Ignorando: não é o dono (${usuario.userId}) nem o admin (${ADMIN_ID})`);
                     return;
                 }
 
@@ -149,7 +150,7 @@ async function iniciarSelfBot(usuario) {
 
                 console.log(`   🎯 Comando detectado: ${command}`);
 
-                // Comandos
+                // ===== COMANDOS =====
                 if (command === 'teste') {
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
                 } else if (command === 'ping') {
@@ -211,8 +212,11 @@ async function iniciarSelfBot(usuario) {
                         await message.reply({ content: resposta, files: [attachment] });
                         await procMsg.delete();
 
+                        // Atualizar contador de comandos
                         usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
                         salvarUsuarios();
+
+                        console.log(`   ✅ QR Code enviado com sucesso`);
                     } catch (error) {
                         console.error(`   ❌ Erro no QR Code:`, error);
                         await procMsg.delete();
