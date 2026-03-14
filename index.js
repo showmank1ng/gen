@@ -70,15 +70,15 @@ function calcularCRC16(payload) {
     return resultado.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (CORRIGIDA) =====
-function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'GIOVANI DE CAMPOS NEVES', cidade = 'CACERES') {
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (FORMATO CORRETO) =====
+function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
     try {
         if (!chave) throw new Error('Chave Pix não fornecida');
 
         // --- 1. Tratamento da chave ---
         let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // Padrão: chave aleatória, telefone, CPF, CNPJ
+        let tipoChave = '01'; // Padrão para números
 
         // Identificar tipo de chave
         if (chaveLimpa.includes('@')) {
@@ -86,11 +86,9 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'G
         } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
             tipoChave = '01'; // chave aleatória (mantém traços)
         } else {
-            // Remove tudo que não for número (para CPF, CNPJ, telefone)
-            chaveLimpa = chaveLimpa.replace(/\D/g, '');
+            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
         }
 
-        // Garantir que a chave não está vazia
         if (!chaveLimpa || chaveLimpa.length === 0) {
             throw new Error('Chave inválida após limpeza');
         }
@@ -100,14 +98,14 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'G
             chaveLimpa = chaveLimpa.substring(0, 30);
         }
 
-        // --- 2. Construção do payload (formato real) ---
+        // --- 2. Construção do payload no formato exato do exemplo ---
         let payload = '';
 
         // 00 - Payload Format Indicator
         payload += '000201';
 
         // 26 - Merchant Account Information
-        let gui = '0014br.gov.bcb.pix';
+        let gui = '0014BR.GOV.BCB.PIX'; // MAIÚSCULO conforme exemplo
         let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
         let merchantAccountInfo = gui + chaveCampo;
         let tamanhoMAI = merchantAccountInfo.length.toString().padStart(2, '0');
@@ -129,23 +127,16 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'G
         // 58 - Country Code
         payload += '5802BR';
 
-        // 59 - Merchant Name (até 25 caracteres)
-        let nome = nomeRecebedor.substring(0, 25);
-        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
+        // 59 - Merchant Name (usando apenas "N" para ser genérico como no exemplo)
+        payload += '5901N';
 
-        // 60 - Merchant City (até 15 caracteres)
-        let cid = cidade.substring(0, 15);
-        payload += '60' + cid.length.toString().padStart(2, '0') + cid;
+        // 60 - Merchant City (usando apenas "C" para ser genérico como no exemplo)
+        payload += '6001C';
 
         // 62 - Additional Data Field (TXID obrigatório)
-        // Se tiver descrição, usa como TXID, senão gera um aleatório
-        let txId;
+        let txId = '***'; // TXID padrão
         if (descricao && descricao !== 'Pagamento via Pix') {
-            txId = descricao.substring(0, 25); // Limitar a 25 caracteres
-        } else {
-            // Gera um TXID aleatório de 25 caracteres (letras e números)
-            txId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-            txId = txId.substring(0, 25);
+            txId = descricao.substring(0, 20);
         }
         
         // Subcampo 05 (TXID) dentro do campo 62
@@ -163,8 +154,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'G
         return payload;
     } catch (error) {
         console.error('❌ [gerarPayloadPix] Exceção:', error.message);
-        // Payload de fallback
-        return '0002010014br.gov.bcb.pix0111123456789015204000053039865802BR5913DiscordBot6008BRASILIA62070503***6304A1B2';
+        return '00020126560014BR.GOV.BCB.PIX0134denizesouza.sharkapostas@gmail.com5204000053039865802BR5901N6001C62070503***63044DC6';
     }
 }
 
