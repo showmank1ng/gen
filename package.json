@@ -1,7 +1,7 @@
 {
   "name": "pix-multi-bot",
   "version": "1.0.0",
-  "description": "Bot para gerar QR Code Pix com múltiplos usuários",
+  "description": "Bot para gerar QR Code Pix",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
