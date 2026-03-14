@@ -6,7 +6,6 @@ const { Client: SelfBotClient } = require('discord.js-selfbot-v13');
 const { Client: BotPrincipalClient, GatewayIntentBits } = require('discord.js');
 const QRCode = require('qrcode');
 const { MessageAttachment } = require('discord.js-selfbot-v13');
-const { generatePayload } = require('pix-payload'); // Biblioteca confiável
 
 // ===== CONFIGURAÇÕES =====
 const PREFIX = process.env.PREFIX || '!';
@@ -53,36 +52,41 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD USANDO BIBLIOTECA CONFIÁVEL =====
-function gerarPayloadPix(chave, valor = null, descricao = '') {
-    console.log(`   [gerarPayloadPix] Chave: ${chave}, Valor: ${valor}, Descrição: ${descricao}`);
+// ===== FUNÇÃO PARA GERAR PAYLOAD USANDO API =====
+async function gerarPayloadPix(chave, valor = null, descricao = '') {
+    console.log(`   [API] Solicitando Pix para chave: ${chave}, valor: ${valor}, descrição: ${descricao}`);
 
     try {
-        // Parâmetros para o payload
-        const params = {
-            nomeRecebedor: 'PIX MULTI BOT',  // Máx 25 caracteres
-            cidadeRecebedor: 'BRASILIA',     // Máx 15 caracteres
-            chavePix: chave,
-            valor: valor ? parseFloat(valor.replace(',', '.')) : null,
-            identificador: descricao || undefined,
-        };
+        // Construir URL da API com parâmetros
+        let url = `https://gerarqrcodepix.com.br/api/v1?nome=PIX%20MULTI%20BOT&cidade=BRASILIA&chave=${encodeURIComponent(chave)}&saida=br`;
 
-        // Gera o payload usando a biblioteca
-        const payload = generatePayload(params);
+        if (valor) {
+            const valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
+            url += `&valor=${valorNum}`;
+        }
 
-        console.log(`   ✅ Payload gerado: ${payload}`);
-        return payload;
+        if (descricao && descricao !== 'Pagamento via Pix') {
+            const txid = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+            if (txid.length > 0) {
+                url += `&txid=${encodeURIComponent(txid)}`;
+            }
+        }
+
+        console.log(`   📡 URL: ${url}`);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`API retornou erro ${response.status}`);
+        }
+
+        const brCode = await response.text();
+        console.log(`   ✅ BR Code recebido (${brCode.length} caracteres)`);
+        return brCode;
     } catch (error) {
-        console.error('❌ Erro na geração do payload:', error.message);
-        // Payload de fallback (exemplo do BC)
+        console.error('❌ Erro na API:', error.message);
+        // Payload de fallback (exemplo do Banco Central)
         return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
-}
-
-// ===== FUNÇÃO PARA GERAR PAYLOAD DE TESTE (EXEMPLO DO BANCO CENTRAL) =====
-function gerarPayloadTeste() {
-    // Este payload é um exemplo que deve funcionar em qualquer banco
-    return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
 }
 
 // ===== FUNÇÃO PARA INICIAR SELF-BOT =====
@@ -140,7 +144,7 @@ async function iniciarSelfBot(usuario) {
                     const procMsg = await message.reply('🔄 Gerando QR Code...');
 
                     try {
-                        const payload = gerarPayloadPix(chavePix, valor, descricao);
+                        const payload = await gerarPayloadPix(chavePix, valor, descricao);
                         const qrBuffer = await QRCode.toBuffer(payload, { width: 400 });
                         const attachment = new MessageAttachment(qrBuffer, 'pix.png');
 
@@ -160,32 +164,13 @@ async function iniciarSelfBot(usuario) {
                         await procMsg.delete();
                         await message.reply('❌ Erro ao gerar QR Code.');
                     }
-                } else if (command === 'pix-teste') {
-                    // Comando para testar com payload fixo
-                    const procMsg = await message.reply('🔄 Gerando QR Code de teste...');
-                    try {
-                        const payload = gerarPayloadTeste();
-                        const qrBuffer = await QRCode.toBuffer(payload, { width: 400 });
-                        const attachment = new MessageAttachment(qrBuffer, 'pix-teste.png');
-
-                        await message.reply({
-                            content: `✅ **QR CODE DE TESTE**\n\nEste é um payload fixo que deve funcionar em qualquer banco.\n\`\`\`${payload}\`\`\``,
-                            files: [attachment]
-                        });
-                        await procMsg.delete();
-                    } catch (error) {
-                        console.error('❌ Erro no teste:', error);
-                        await procMsg.delete();
-                        await message.reply('❌ Erro no teste.');
-                    }
                 } else if (command === 'pix-info') {
                     await message.reply(
                         '📌 **Sobre o Pix:**\n\n' +
                         '• A chave Pix deve estar cadastrada no seu banco.\n' +
-                        '• Teste com `!pix-teste` para verificar se o QR Code é gerado.\n' +
-                        '• Se o QR Code de teste funcionar, o problema é sua chave.\n' +
-                        '• Você pode gerar um QR Code sem valor ou com valor fixo.\n\n' +
-                        '🔗 **Validador online:** https://pix.ae/ (não é API, mas você pode colar o código lá)'
+                        '• Você pode gerar um QR Code sem valor ou com valor fixo.\n' +
+                        '• Este bot usa a API pública https://gerarqrcodepix.com.br para gerar os códigos.\n\n' +
+                        '🔗 Para testar manualmente: https://gerarqrcodepix.com.br'
                     );
                 }
             } catch (error) {
