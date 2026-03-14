@@ -57,7 +57,24 @@ async function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [API] Solicitando Pix para chave: ${chave}, valor: ${valor}, descrição: ${descricao}`);
 
     try {
-        let url = `https://gerarqrcodepix.com.br/api/v1?nome=PIX%20MULTI%20BOT&cidade=BRASILIA&chave=${encodeURIComponent(chave)}&saida=br`;
+        // --- Formatar chave para telefone se necessário ---
+        let chaveFormatada = chave.trim();
+        
+        // Se for apenas números e tiver 11 dígitos (telefone com DDD), adiciona +55
+        if (/^\d{11}$/.test(chaveFormatada)) {
+            chaveFormatada = '+55' + chaveFormatada;
+            console.log(`   📞 Chave formatada como telefone: ${chaveFormatada}`);
+        }
+        // Se tiver 10 dígitos (telefone sem o 9 inicial?), também adiciona +55
+        else if (/^\d{10}$/.test(chaveFormatada)) {
+            chaveFormatada = '+55' + chaveFormatada;
+            console.log(`   📞 Chave formatada como telefone: ${chaveFormatada}`);
+        }
+        // Se já começar com +55, mantém
+        // Caso contrário, mantém a chave original (pode ser email, CPF, etc.)
+
+        // Construir URL da API
+        let url = `https://gerarqrcodepix.com.br/api/v1?nome=PIX%20MULTI%20BOT&cidade=BRASILIA&chave=${encodeURIComponent(chaveFormatada)}&saida=br`;
 
         if (valor) {
             const valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
