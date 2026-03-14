@@ -72,23 +72,24 @@ function calcularCRC16(payload) {
     return resultado.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (BASEADA NA ESPECIFICAÇÃO OFICIAL) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (BASE OFICIAL) =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
     
     try {
-        // --- 1. VALIDAÇÃO E LIMPEZA DA CHAVE ---
         if (!chave) throw new Error('Chave Pix não fornecida');
-        
+
+        // --- 1. LIMPEZA E IDENTIFICAÇÃO DA CHAVE ---
         let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // Padrão: telefone/CPF/CNPJ/chave aleatória
+        let tipoChave = '01'; // Padrão para telefone, CPF, CNPJ, chave aleatória
 
         if (chaveLimpa.includes('@')) {
             tipoChave = '02'; // e-mail
-        } else if (chaveLimpa.includes('-') && chaveLimpa.length === 36) {
-            tipoChave = '01'; // chave aleatória (UUID)
+        } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
+            // Chave aleatória (mantém os traços)
+            tipoChave = '01';
         } else {
-            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
+            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove tudo que não for número
         }
 
         if (!chaveLimpa || chaveLimpa.length === 0) {
@@ -99,17 +100,17 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
             chaveLimpa = chaveLimpa.substring(0, 30);
         }
 
-        // --- 2. CONSTRUÇÃO DO PAYLOAD SEGUINDO O PADRÃO EMV ---
+        // --- 2. CONSTRUÇÃO DO PAYLOAD PASSO A PASSO ---
         let payload = '';
 
         // 00 - Payload Format Indicator (fixo: 01)
         payload += '000201';
 
         // 26 - Merchant Account Information
-        let gui = '0014BR.GOV.BCB.PIX'; // GUI fixo do BC
-        let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
-        let accountInfo = gui + chaveCampo;
-        let accountInfoLen = accountInfo.length.toString().padStart(2, '0');
+        const gui = '0014BR.GOV.BCB.PIX'; // GUI fixo
+        const chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
+        const accountInfo = gui + chaveCampo;
+        const accountInfoLen = accountInfo.length.toString().padStart(2, '0');
         payload += '26' + accountInfoLen + accountInfo;
 
         // 52 - Merchant Category Code (fixo: 0000)
@@ -118,10 +119,10 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         // 53 - Transaction Currency (986 = Real)
         payload += '5303986';
 
-        // 54 - Transaction Amount (opcional)
+        // 54 - Transaction Amount (se houver valor)
         if (valor) {
-            let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
-            let valorStr = valorNum.replace('.', '');
+            const valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
+            const valorStr = valorNum.replace('.', '');
             payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
         }
 
@@ -129,10 +130,12 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
         payload += '5802BR';
 
         // 59 - Merchant Name (até 25 caracteres)
-        payload += '5915PIX MULTI BOT'; // Nome fixo
+        const nomeRecebedor = 'PIX MULTI BOT';
+        payload += '59' + nomeRecebedor.length.toString().padStart(2, '0') + nomeRecebedor;
 
         // 60 - Merchant City (até 15 caracteres)
-        payload += '6008BRASILIA'; // Cidade fixa
+        const cidade = 'BRASILIA';
+        payload += '60' + cidade.length.toString().padStart(2, '0') + cidade;
 
         // 62 - Additional Data Field (TXID obrigatório)
         let txId = '***';
@@ -140,29 +143,27 @@ function gerarPayloadPix(chave, valor = null, descricao = '') {
             txId = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
             if (txId.length === 0) txId = '***';
         }
-        
-        let txIdField = '05' + txId.length.toString().padStart(2, '0') + txId;
-        let txIdFieldLen = txIdField.length.toString().padStart(2, '0');
+        const txIdField = '05' + txId.length.toString().padStart(2, '0') + txId;
+        const txIdFieldLen = txIdField.length.toString().padStart(2, '0');
         payload += '62' + txIdFieldLen + txIdField;
 
         // --- 3. CÁLCULO DO CRC16 ---
-        let payloadParaCRC = payload + '6304';
-        let crc = calcularCRC16(payloadParaCRC);
-        payload = payload + '6304' + crc;
+        const payloadParaCRC = payload + '6304';
+        const crc = calcularCRC16(payloadParaCRC);
+        payload += '6304' + crc;
 
         console.log(`   ✅ Payload gerado: ${payload}`);
         return payload;
-        
     } catch (error) {
         console.error('❌ [gerarPayloadPix] Exceção:', error.message);
-        // Retorna um payload de exemplo que funciona (chave 11111111111)
+        // Payload de fallback (chave 11111111111, testado)
         return '00020126360014BR.GOV.BCB.PIX0111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
 }
 
-// ===== FUNÇÃO PARA GERAR PAYLOAD DE TESTE (FIXO E CONHECIDO) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD DE TESTE (EXEMPLO DO BANCO CENTRAL) =====
 function gerarPayloadTeste() {
-    // Payload de exemplo do Banco Central (funciona em qualquer banco)
+    // Este payload é um exemplo conhecido e deve funcionar em qualquer banco
     return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
 }
 
@@ -259,6 +260,11 @@ async function iniciarSelfBot(usuario) {
                         await procMsg.delete();
                         await message.reply('❌ Erro no teste.');
                     }
+                } else if (command === 'pix-validador') {
+                    // Comando para gerar payload e link para validador online
+                    const payload = gerarPayloadPix('11111111111', '1.00', 'teste');
+                    const url = `https://www.gerarpix.com.br/validador-pix?payload=${encodeURIComponent(payload)}`;
+                    await message.reply(`🔗 **Valide seu payload aqui:** ${url}\n\`\`\`${payload}\`\`\``);
                 }
             } catch (error) {
                 console.error('❌ Erro no self-bot:', error);
@@ -361,7 +367,7 @@ botPrincipal.login(BOT_TOKEN).catch(err => {
     process.exit(1);
 });
 
-// ===== HEARTBEAaa =====
+// ===== HEARTBEAT =====
 setInterval(() => {
     console.log(`💓 Heartbeat - Usuários: ${usuarios.length} | Online: ${selfBotsAtivos.size}`);
 }, 60000);
