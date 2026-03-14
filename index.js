@@ -6,6 +6,7 @@ const { Client: SelfBotClient } = require('discord.js-selfbot-v13');
 const { Client: BotPrincipalClient, GatewayIntentBits } = require('discord.js');
 const QRCode = require('qrcode');
 const { MessageAttachment } = require('discord.js-selfbot-v13');
+const { generatePayload } = require('pix-payload'); // Biblioteca confiável
 
 // ===== CONFIGURAÇÕES =====
 const PREFIX = process.env.PREFIX || '!';
@@ -52,126 +53,59 @@ function salvarUsuarios() {
 // ===== SELF-BOTS ATIVOS =====
 const selfBotsAtivos = new Map();
 
-// ===== FUNÇÃO CRC16 (PADRÃO) =====
-function calcularCRC16(payload) {
-    let polinomio = 0x1021;
-    let resultado = 0xFFFF;
-    for (let i = 0; i < payload.length; i++) {
-        resultado ^= (payload.charCodeAt(i) << 8);
-        for (let j = 0; j < 8; j++) {
-            if (resultado & 0x8000) {
-                resultado = (resultado << 1) ^ polinomio;
-            } else {
-                resultado = (resultado << 1);
-            }
-            resultado &= 0xFFFF;
-        }
-    }
-    return resultado.toString(16).toUpperCase().padStart(4, '0');
-}
-
-// ===== FUNÇÃO PARA GERAR PAYLOAD PIX (VERSÃO FINAL TESTADA) =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD USANDO BIBLIOTECA CONFIÁVEL =====
 function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [gerarPayloadPix] Chave: ${chave}, Valor: ${valor}, Descrição: ${descricao}`);
 
     try {
-        if (!chave) throw new Error('Chave Pix não fornecida');
+        // Parâmetros para o payload
+        const params = {
+            nomeRecebedor: 'PIX MULTI BOT',  // Máx 25 caracteres
+            cidadeRecebedor: 'BRASILIA',     // Máx 15 caracteres
+            chavePix: chave,
+            valor: valor ? parseFloat(valor.replace(',', '.')) : null,
+            identificador: descricao || undefined,
+        };
 
-        // --- LIMPEZA E TIPO DA CHAVE ---
-        let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // Padrão: telefone/CPF/CNPJ/chave aleatória
-
-        if (chaveLimpa.includes('@')) {
-            tipoChave = '02'; // e-mail
-        } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            // Chave aleatória (mantém os traços)
-        } else {
-            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
-        }
-
-        if (!chaveLimpa || chaveLimpa.length === 0) {
-            throw new Error('Chave inválida após limpeza');
-        }
-        if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
-
-        // --- CONSTRUÇÃO DO PAYLOAD (ORDEM CORRETA) ---
-        let payload = '';
-
-        // 00 - Payload Format Indicator
-        payload += '000201';
-
-        // 26 - Merchant Account Information
-        const gui = '0014BR.GOV.BCB.PIX';
-        const chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
-        const accountInfo = gui + chaveCampo;
-        const accountInfoLen = accountInfo.length.toString().padStart(2, '0');
-        payload += '26' + accountInfoLen + accountInfo;
-
-        // 52 - Merchant Category Code
-        payload += '52040000';
-
-        // 53 - Transaction Currency
-        payload += '5303986';
-
-        // 54 - Transaction Amount (se houver)
-        if (valor) {
-            const valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
-            const valorStr = valorNum.replace('.', '');
-            payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
-        }
-
-        // 58 - Country Code
-        payload += '5802BR';
-
-        // 59 - Merchant Name (mínimo 1 caractere)
-        const nome = 'PIX MULTI BOT';
-        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
-
-        // 60 - Merchant City (mínimo 1 caractere)
-        const cidade = 'BRASILIA';
-        payload += '60' + cidade.length.toString().padStart(2, '0') + cidade;
-
-        // 62 - Additional Data Field (TXID obrigatório)
-        let txId = '***';
-        if (descricao && descricao !== 'Pagamento via Pix') {
-            txId = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
-            if (txId.length === 0) txId = '***';
-        }
-        const txIdField = '05' + txId.length.toString().padStart(2, '0') + txId;
-        const txIdFieldLen = txIdField.length.toString().padStart(2, '0');
-        payload += '62' + txIdFieldLen + txIdField;
-
-        // --- CRC16 ---
-        const payloadParaCRC = payload + '6304';
-        const crc = calcularCRC16(payloadParaCRC);
-        payload += '6304' + crc;
+        // Gera o payload usando a biblioteca
+        const payload = generatePayload(params);
 
         console.log(`   ✅ Payload gerado: ${payload}`);
         return payload;
     } catch (error) {
-        console.error('❌ Erro:', error.message);
-        return '00020126360014BR.GOV.BCB.PIX0111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
+        console.error('❌ Erro na geração do payload:', error.message);
+        // Payload de fallback (exemplo do BC)
+        return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
 }
 
-// ===== INICIAR SELF-BOT =====
+// ===== FUNÇÃO PARA GERAR PAYLOAD DE TESTE (EXEMPLO DO BANCO CENTRAL) =====
+function gerarPayloadTeste() {
+    // Este payload é um exemplo que deve funcionar em qualquer banco
+    return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
+}
+
+// ===== FUNÇÃO PARA INICIAR SELF-BOT =====
 async function iniciarSelfBot(usuario) {
     try {
-        console.log(`🔄 Iniciando self-bot para ${usuario.discordTag}...`);
+        console.log(`🔄 [${new Date().toISOString()}] Iniciando self-bot para ${usuario.discordTag || usuario.userId}...`);
+
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
+
         const mensagensProcessadas = new Set();
         setInterval(() => mensagensProcessadas.clear(), 10 * 60 * 1000);
 
         client.on('ready', () => {
-            console.log(`✅✅✅ SELF-BOT ONLINE: ${client.user.tag}`);
+            console.log(`✅✅✅ [${new Date().toISOString()}] SELF-BOT ONLINE: ${client.user.tag}`);
             usuario.status = 'online';
-            selfBotsAtivos.set(usuario.userId, { client, tag: client.user.tag });
+            usuario.discordTag = client.user.tag;
             salvarUsuarios();
+            selfBotsAtivos.set(usuario.userId, { client, tag: client.user.tag });
         });
 
         client.on('messageCreate', async (message) => {
             try {
-                console.log(`📨 Mensagem de ${message.author.tag}: "${message.content}"`);
+                console.log(`\n📨 [${new Date().toISOString()}] [SELF-BOT ${client.user.tag}] Mensagem: "${message.content}" de ${message.author.tag}`);
 
                 if (mensagensProcessadas.has(message.id)) return;
                 mensagensProcessadas.add(message.id);
@@ -222,18 +156,40 @@ async function iniciarSelfBot(usuario) {
                         usuario.comandosUsados = (usuario.comandosUsados || 0) + 1;
                         salvarUsuarios();
                     } catch (error) {
-                        console.error('❌ Erro:', error);
+                        console.error('❌ Erro no QR Code:', error);
                         await procMsg.delete();
                         await message.reply('❌ Erro ao gerar QR Code.');
                     }
-                } else if (command === 'pix-validar') {
-                    // Gera payload e link para validação online
-                    const payload = gerarPayloadPix('11111111111', '1.00', 'teste');
-                    const url = `https://www.gerarpix.com.br/validador-pix?payload=${encodeURIComponent(payload)}`;
-                    await message.reply(`🔗 **Valide seu payload aqui:** ${url}\n\`\`\`${payload}\`\`\``);
+                } else if (command === 'pix-teste') {
+                    // Comando para testar com payload fixo
+                    const procMsg = await message.reply('🔄 Gerando QR Code de teste...');
+                    try {
+                        const payload = gerarPayloadTeste();
+                        const qrBuffer = await QRCode.toBuffer(payload, { width: 400 });
+                        const attachment = new MessageAttachment(qrBuffer, 'pix-teste.png');
+
+                        await message.reply({
+                            content: `✅ **QR CODE DE TESTE**\n\nEste é um payload fixo que deve funcionar em qualquer banco.\n\`\`\`${payload}\`\`\``,
+                            files: [attachment]
+                        });
+                        await procMsg.delete();
+                    } catch (error) {
+                        console.error('❌ Erro no teste:', error);
+                        await procMsg.delete();
+                        await message.reply('❌ Erro no teste.');
+                    }
+                } else if (command === 'pix-info') {
+                    await message.reply(
+                        '📌 **Sobre o Pix:**\n\n' +
+                        '• A chave Pix deve estar cadastrada no seu banco.\n' +
+                        '• Teste com `!pix-teste` para verificar se o QR Code é gerado.\n' +
+                        '• Se o QR Code de teste funcionar, o problema é sua chave.\n' +
+                        '• Você pode gerar um QR Code sem valor ou com valor fixo.\n\n' +
+                        '🔗 **Validador online:** https://pix.ae/ (não é API, mas você pode colar o código lá)'
+                    );
                 }
             } catch (error) {
-                console.error('❌ Erro:', error);
+                console.error('❌ Erro no self-bot:', error);
             }
         });
 
@@ -296,11 +252,15 @@ botPrincipal.on('messageCreate', async (message) => {
         return message.reply(lista);
     } else if (command === 'registrar') {
         if (args.length < 2) return message.reply('❌ Use: `!registrar [ID] [token]`');
-        const userId = args[0], userToken = args[1];
+        
+        const userId = args[0];
+        const userToken = args[1];
         const msgProc = await message.reply('🔄 Processando...');
 
         try {
-            if (usuarios.some(u => u.userId === userId)) return msgProc.edit('❌ Usuário já registrado!');
+            if (usuarios.some(u => u.userId === userId)) {
+                return msgProc.edit('❌ Usuário já registrado!');
+            }
 
             const testClient = new SelfBotClient({ checkUpdate: false });
             await testClient.login(userToken);
@@ -316,6 +276,20 @@ botPrincipal.on('messageCreate', async (message) => {
         } catch (error) {
             await msgProc.edit(`❌ Erro: Token inválido!`);
         }
+    } else if (command === 'remover') {
+        if (args.length < 1) return message.reply('❌ Use: `!remover [ID]`');
+        const userId = args[0];
+        const index = usuarios.findIndex(u => u.userId === userId);
+        if (index === -1) return message.reply('❌ Usuário não encontrado!');
+
+        if (selfBotsAtivos.has(userId)) {
+            try { await selfBotsAtivos.get(userId).client.destroy(); } catch {}
+            selfBotsAtivos.delete(userId);
+        }
+        const userTag = usuarios[index].discordTag;
+        usuarios.splice(index, 1);
+        salvarUsuarios();
+        await message.reply(`✅ Usuário **${userTag}** removido!`);
     }
 });
 

@@ -8,9 +8,10 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "discord.js-selfbot-v13": "3.1.4",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "qrcode": "^1.5.3",
-    "dotenv": "^16.3.1"
+    "pix-payload": "^1.0.4",
+    "qrcode": "^1.5.3"
   },
   "overrides": {
     "undici": "5.28.4"
