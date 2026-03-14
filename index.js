@@ -71,76 +71,91 @@ function calcularCRC16(payload) {
 }
 
 // ===== FUNÇÃO PARA GERAR PAYLOAD PIX (CORRIGIDA) =====
-function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'DiscordBot', cidade = 'BRASILIA') {
+function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'GIOVANI DE CAMPOS NEVES', cidade = 'CACERES') {
     console.log(`   [gerarPayloadPix] Chamada com chave: ${chave}, valor: ${valor}, descricao: ${descricao}`);
     try {
         if (!chave) throw new Error('Chave Pix não fornecida');
 
-        // --- Tratamento da chave ---
+        // --- 1. Tratamento da chave ---
         let chaveLimpa = chave.trim();
-        let tipoChave = '01'; // Padrão para números
+        let tipoChave = '01'; // Padrão: chave aleatória, telefone, CPF, CNPJ
 
+        // Identificar tipo de chave
         if (chaveLimpa.includes('@')) {
             tipoChave = '02'; // e-mail
         } else if (chaveLimpa.length === 36 && chaveLimpa.includes('-')) {
-            tipoChave = '01'; // chave aleatória (UUID) – tratada como texto
+            tipoChave = '01'; // chave aleatória (mantém traços)
         } else {
-            chaveLimpa = chaveLimpa.replace(/\D/g, ''); // remove não numéricos
+            // Remove tudo que não for número (para CPF, CNPJ, telefone)
+            chaveLimpa = chaveLimpa.replace(/\D/g, '');
         }
 
+        // Garantir que a chave não está vazia
         if (!chaveLimpa || chaveLimpa.length === 0) {
-            chaveLimpa = chave.substring(0, 30);
+            throw new Error('Chave inválida após limpeza');
         }
-        if (chaveLimpa.length > 30) chaveLimpa = chaveLimpa.substring(0, 30);
 
-        // --- Construção do payload ---
+        // Limitar tamanho máximo da chave (30 caracteres)
+        if (chaveLimpa.length > 30) {
+            chaveLimpa = chaveLimpa.substring(0, 30);
+        }
+
+        // --- 2. Construção do payload (formato real) ---
         let payload = '';
 
-        // 00 Payload Format Indicator
+        // 00 - Payload Format Indicator
         payload += '000201';
 
-        // 26 Merchant Account Information
+        // 26 - Merchant Account Information
         let gui = '0014br.gov.bcb.pix';
         let chaveCampo = tipoChave + chaveLimpa.length.toString().padStart(2, '0') + chaveLimpa;
         let merchantAccountInfo = gui + chaveCampo;
         let tamanhoMAI = merchantAccountInfo.length.toString().padStart(2, '0');
         payload += '26' + tamanhoMAI + merchantAccountInfo;
 
-        // 52 Merchant Category Code
+        // 52 - Merchant Category Code
         payload += '52040000';
 
-        // 53 Transaction Currency
+        // 53 - Transaction Currency
         payload += '5303986';
 
-        // 58 Country Code
-        payload += '5802BR';
-
-        // 59 Merchant Name
-        let nome = nomeRecebedor.substring(0, 25);
-        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
-
-        // 60 Merchant City
-        let cid = cidade.substring(0, 15);
-        payload += '60' + cid.length.toString().padStart(2, '0') + cid;
-
-        // 54 Transaction Amount (opcional)
+        // 54 - Transaction Amount (se houver valor)
         if (valor) {
             let valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
             let valorStr = valorNum.replace('.', '');
             payload += '54' + valorStr.length.toString().padStart(2, '0') + valorNum;
         }
 
-        // 62 Additional Data Field (obrigatório ter TXID)
-        let txId = '***'; // padrão
-        if (descricao && descricao !== 'Pagamento via Pix') {
-            txId = descricao.substring(0, 20);
-        }
-        let subcampo05 = '05' + txId.length.toString().padStart(2, '0') + txId;
-        payload += '62' + subcampo05.length.toString().padStart(2, '0') + subcampo05;
+        // 58 - Country Code
+        payload += '5802BR';
 
-        // --- CRC16 ---
-        let payloadParaCRC = payload + '6304';
-        let crc = calcularCRC16(payloadParaCRC);
+        // 59 - Merchant Name (até 25 caracteres)
+        let nome = nomeRecebedor.substring(0, 25);
+        payload += '59' + nome.length.toString().padStart(2, '0') + nome;
+
+        // 60 - Merchant City (até 15 caracteres)
+        let cid = cidade.substring(0, 15);
+        payload += '60' + cid.length.toString().padStart(2, '0') + cid;
+
+        // 62 - Additional Data Field (TXID obrigatório)
+        // Se tiver descrição, usa como TXID, senão gera um aleatório
+        let txId;
+        if (descricao && descricao !== 'Pagamento via Pix') {
+            txId = descricao.substring(0, 25); // Limitar a 25 caracteres
+        } else {
+            // Gera um TXID aleatório de 25 caracteres (letras e números)
+            txId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+            txId = txId.substring(0, 25);
+        }
+        
+        // Subcampo 05 (TXID) dentro do campo 62
+        let subcampo05 = '05' + txId.length.toString().padStart(2, '0') + txId;
+        let campo62 = subcampo05;
+        payload += '62' + campo62.length.toString().padStart(2, '0') + campo62;
+
+        // --- 3. Cálculo do CRC16 ---
+        let payloadSemCRC = payload;
+        let crc = calcularCRC16(payloadSemCRC + '6304');
         payload += '6304' + crc;
 
         console.log(`   ✅ Payload gerado (${payload.length} caracteres)`);
@@ -149,7 +164,7 @@ function gerarPayloadPix(chave, valor = null, descricao = '', nomeRecebedor = 'D
     } catch (error) {
         console.error('❌ [gerarPayloadPix] Exceção:', error.message);
         // Payload de fallback
-        return '0002010014br.gov.bcb.pix0111123456789015204000053039865802BR5913DiscordBot6008BRASILIA62100512Pagamento6304A1B2';
+        return '0002010014br.gov.bcb.pix0111123456789015204000053039865802BR5913DiscordBot6008BRASILIA62070503***6304A1B2';
     }
 }
 
