@@ -10,11 +10,6 @@
     "discord.js-selfbot-v13": "3.1.4",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "node-fetch": "^2.7.0",
-    "pix-payload": "^1.0.4",
     "qrcode": "^1.5.3"
-  },
-  "overrides": {
-    "undici": "5.28.4"
   }
 }

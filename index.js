@@ -12,7 +12,7 @@ const PREFIX = process.env.PREFIX || '!';
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_ID = process.env.ADMIN_ID;
 
-// ===== SERVIDOR WEB =====
+// ===== SERVIDOR WEB (para manter o serviço ativo) =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -24,8 +24,15 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
 
-// ===== BANCO DE DADOS =====
-const dbPath = path.join('/tmp', 'users.json');
+// ===== BANCO DE DADOS (para a Discloud, use um caminho persistente) =====
+// Na Discloud, a pasta /tmp é temporária; o ideal é usar um banco externo,
+// mas para simplificar, usaremos um arquivo JSON na própria pasta do bot.
+const dbPath = path.join(__dirname, 'database', 'users.json');
+
+// Garante que a pasta database existe
+if (!fs.existsSync(path.join(__dirname, 'database'))) {
+    fs.mkdirSync(path.join(__dirname, 'database'));
+}
 
 let usuarios = [];
 try {
@@ -57,28 +64,34 @@ async function gerarPayloadPix(chave, valor = null, descricao = '') {
     console.log(`   [API] Solicitando Pix para chave: ${chave}, valor: ${valor}, descrição: ${descricao}`);
 
     try {
-        // Formatar chave de telefone
+        // --- Formatar chave de telefone ---
         let chaveFormatada = chave.trim();
+        // Se for apenas números e tiver 10 ou 11 dígitos, assume telefone e adiciona +55
         if (/^\d{10,11}$/.test(chaveFormatada)) {
             chaveFormatada = '+55' + chaveFormatada;
             console.log(`   📞 Chave formatada como telefone: ${chaveFormatada}`);
         }
+        // Se já tiver +55 ou for e-mail, mantém
 
-        let url = `https://gerarqrcodepix.com.br/api/v1?nome=PIX%20MULTI%20BOT&cidade=BRASILIA&chave=${encodeURIComponent(chaveFormatada)}&saida=br`;
+        const url = new URL('https://gerarqrcodepix.com.br/api/v1');
+        url.searchParams.append('nome', 'PIX MULTI BOT');
+        url.searchParams.append('cidade', 'BRASILIA');
+        url.searchParams.append('chave', chaveFormatada);
+        url.searchParams.append('saida', 'br');
 
         if (valor) {
             const valorNum = parseFloat(valor.replace(',', '.')).toFixed(2);
-            url += `&valor=${valorNum}`;
+            url.searchParams.append('valor', valorNum);
         }
 
         if (descricao && descricao !== 'Pagamento via Pix') {
             const txid = descricao.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
             if (txid.length > 0) {
-                url += `&txid=${encodeURIComponent(txid)}`;
+                url.searchParams.append('txid', txid);
             }
         }
 
-        console.log(`   📡 URL da API: ${url}`);
+        console.log(`   📡 URL da API: ${url.toString()}`);
 
         const response = await fetch(url);
         if (!response.ok) throw new Error(`API retornou erro ${response.status}`);
@@ -92,6 +105,7 @@ async function gerarPayloadPix(chave, valor = null, descricao = '') {
 
     } catch (error) {
         console.error('❌ Erro na API:', error.message);
+        // Payload de fallback (chave 11111111111)
         return '00020126360014BR.GOV.BCB.PIX0114111111111111115204000053039865802BR5915PIX MULTI BOT6008BRASILIA62070503***6304EB32';
     }
 }
@@ -103,7 +117,7 @@ async function iniciarSelfBot(usuario) {
 
         const client = new SelfBotClient({ checkUpdate: false, intents: 32767 });
 
-        // Cache para evitar mensagens duplicadas
+        // Cache para evitar mensagens duplicadas (baseado no ID)
         const mensagensProcessadas = new Set();
         setInterval(() => {
             console.log(`🧹 [${client.user ? client.user.tag : 'desconhecido'}] Limpando cache de mensagens (${mensagensProcessadas.size} itens)`);
@@ -127,11 +141,11 @@ async function iniciarSelfBot(usuario) {
 
                 // Verificação de duplicação
                 if (mensagensProcessadas.has(message.id)) {
-                    console.log(`   ⚠️ DUPLICATA DETECTADA! Mensagem ID ${message.id} já foi processada. Ignorando.`);
+                    console.log(`   ⚠️ DUPLICATA DETECTADA! Mensagem ID ${message.id} ignorada.`);
                     return;
                 }
                 mensagensProcessadas.add(message.id);
-                console.log(`   ✅ Mensagem ID ${message.id} adicionada ao cache.`);
+                console.log(`   ✅ Mensagem ID ${message.id} registrada no cache.`);
 
                 // Ignorar próprias mensagens
                 if (message.author.id === client.user.id) {
@@ -156,7 +170,7 @@ async function iniciarSelfBot(usuario) {
 
                 console.log(`   🎯 Comando detectado: ${command}`);
 
-                // Comandos
+                // ===== COMANDOS =====
                 if (command === 'teste') {
                     await message.reply('✅ **Self-bot funcionando perfeitamente!**');
                 } else if (command === 'ping') {
@@ -199,8 +213,6 @@ async function iniciarSelfBot(usuario) {
 
                     try {
                         const payload = await gerarPayloadPix(chavePix, valor, descricao);
-                        console.log(`   📦 Payload recebido, gerando QR Code...`);
-
                         const qrBuffer = await QRCode.toBuffer(payload, { type: 'png', width: 400, margin: 2 });
                         const attachment = new MessageAttachment(qrBuffer, 'pix.png');
 
@@ -295,6 +307,7 @@ botPrincipal.on('messageCreate', async (message) => {
         for (const u of usuarios) {
             const online = selfBotsAtivos.has(u.userId) ? '🟢' : '🔴';
             lista += `${online} **${u.discordTag || u.userId}**\n`;
+            if (u.comandosUsados) lista += `   └ Comandos: ${u.comandosUsados}\n`;
         }
         return message.reply(lista);
     } else if (command === 'registrar') {
@@ -356,7 +369,7 @@ botPrincipal.on('messageCreate', async (message) => {
     }
 });
 
-// ===== INICIAR =====
+// ===== INICIAR BOT PRINCIPAL =====
 if (!BOT_TOKEN) {
     console.error('❌ BOT_TOKEN não configurado!');
     process.exit(1);
@@ -370,3 +383,12 @@ botPrincipal.login(BOT_TOKEN).catch(err => {
 setInterval(() => {
     console.log(`💓 Heartbeat - Usuários: ${usuarios.length} | Online: ${selfBotsAtivos.size}`);
 }, 60000);
+
+// ===== TRATAMENTO DE ERROS NÃO CAPTURADOS =====
+process.on('uncaughtException', (err) => {
+    console.error('❌ Exceção não capturada:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('❌ Promise rejeitada:', err);
+});
